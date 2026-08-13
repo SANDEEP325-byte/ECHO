@@ -33,3 +33,6 @@ dist/
 # OS
 Thumbs.db
 .DS_Store
+
+# ECHO local persistent data
+data/

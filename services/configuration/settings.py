@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     
         
     ollama_host: str ="http://localhost:11434"
-    ollama_host: str = ""
+    ollama_model: str = "qwen3:0.6b"
     
     model_config = SettingsConfigDict(
         env_file=".env",
