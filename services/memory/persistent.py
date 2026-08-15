@@ -11,7 +11,10 @@ class PersistentMemory:
             
             connection.commit()
             
-    def get_recent_messages(self,limit: int= 20) -> list[dict[str, str]]:
+    def get_recent_messages(
+        self,
+        limit: int= 20
+    ) -> list[dict[str, str]]:
         with get_connection() as connection:
             rows= connection.execute(
                 """SELECT role, content FROM messages
@@ -29,9 +32,9 @@ class PersistentMemory:
             
             return messages
         
-        def clear(self) -> None:
-            with get_connection() as connection:
-                connection.execute("DELETE FROM messages")
-                connection.commit()
+    def clear(self) -> None:
+        with get_connection() as connection:
+            connection.execute("DELETE FROM messages")
+            connection.commit()
                 
 persistent_memory = PersistentMemory()
