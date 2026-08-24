@@ -36,3 +36,5 @@ Thumbs.db
 
 # ECHO local persistent data
 data/
+
+docs/

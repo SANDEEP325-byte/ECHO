@@ -1,10 +1,8 @@
 from typing import Any
-
 import httpx
 
 from services.configuration.settings import settings
 from services.memory.conversation import Message
-
 
 class AIGateway:
     """Gateway between ECHO and the configured local AI model."""
@@ -13,11 +11,13 @@ class AIGateway:
         self,
         messages: list[Message],
         tool_result: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         prompt = self._build_prompt(
             messages,
             tool_result=tool_result,
-            )
+            tools=tools,
+        )
 
         payload: dict[str, Any] = {
             "model": settings.ollama_model,
@@ -41,7 +41,9 @@ class AIGateway:
     def _build_prompt(
         messages: list[Message],
         tool_result: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
+
         lines: list[str] = [
             "You are ECHO, a personal AI assistant.",
             "Your name is ECHO.",
@@ -52,23 +54,45 @@ class AIGateway:
             "Do not invent information.",
             "Keep simple answers concise but natural.",
             "For greetings, respond naturally and warmly.",
-            "",
-            "Conversation:",
         ]
 
+        if tools:
+            lines.extend(
+                [
+                    "",
+                    "Available tools:",
+                ]
+            )
+
+            for tool in tools:
+                lines.append(
+                    f"- {tool['name']}: {tool['description']}"
+                )
+
+        lines.extend(
+            [
+                "",
+                "Conversation:",
+            ]
+        )
+
         for message in messages:
-            if message.role == "user":
+            if message.role == "system":
+                lines.append(message.content)
+
+            elif message.role == "user":
                 lines.append(f"User: {message.content}")
+
             elif message.role == "assistant":
                 lines.append(f"ECHO: {message.content}")
-       
+
         if tool_result is not None:
             lines.extend(
                 [
                     "",
                     f"Tool result: {tool_result}",
                     "Use this result as the factual answer.",
-                    "Do not recalculate or change thee tool result.",
+                    "Do not recalculate or change the tool result.",
                 ]
             )
 
@@ -81,6 +105,5 @@ class AIGateway:
         )
 
         return "\n".join(lines)
-
 
 ai_gateway = AIGateway()
