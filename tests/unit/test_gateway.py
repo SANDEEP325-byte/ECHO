@@ -168,3 +168,30 @@ async def test_gateway_raises_http_error(monkeypatch):
 
     with pytest.raises(RuntimeError):
         await gateway.generate(messages)
+        
+@pytest.mark.anyio
+async def test_gateway_handles_client_exception(monkeypatch):
+    gateway = AIGateway()
+
+    class FakeAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            pass
+
+        async def post(self, *args, **kwargs):
+            raise RuntimeError("AI service unavailable.")
+
+    monkeypatch.setattr(
+        "services.brain.gateway.httpx.AsyncClient",
+        lambda timeout: FakeAsyncClient(),
+    )
+
+    messages = [
+        Message(role="user", content="Hello"),
+    ]
+
+    result = await gateway.generate(messages)
+
+    assert result == "I couldn't reach the AI service right now."

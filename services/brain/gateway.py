@@ -5,6 +5,7 @@ import httpx
 from services.configuration.settings import settings
 from services.memory.conversation import Message
 from services.brain.prompt_builder import prompt_builder
+from services.logging.logger import logger
 
 class AIGateway:
     """Gateway between ECHO and the configured local AI model."""
@@ -27,11 +28,15 @@ class AIGateway:
             "stream": False,
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{settings.ollama_host}/api/generate",
-                json=payload,
-            )
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    f"{settings.ollama_host}/api/generate",
+                    json=payload,
+                )
+        except Exception as exc:
+            logger.error("AI Gateway request failed: {}", exc)
+            return "I couldn't reach the AI service right now."
 
         response.raise_for_status()
 
