@@ -1,0 +1,55 @@
+from packages.interfaces.security import (
+    PermissionDecision,
+    RiskLevel,
+    SafetyResult,
+)
+from services.security.permission_manager import permission_manager
+from services.security.risk import risk_classifier
+from services.logging.logger import logger
+
+class SafetyEngine:
+    """Evaluates whether an ECHO operation is safe to execute."""
+    
+    def evaluate(
+        self,
+        operation: str,
+    ) -> SafetyResult:
+        """Evaluate an operation and return its safety decision."""
+        
+        normalized = operation.strip().lower()
+        
+        logger.info(
+            "Evaluating safety for operation: {}",
+            normalized,
+        )
+        
+        risk_level = risk_classifier.classify(normalized)
+        
+        decision = permission_manager.decide(risk_level)
+        
+        if decision == PermissionDecision.ALLOW:
+            reason = "Operation is allowed."
+            
+        elif decision == PermissionDecision.CONFIRM:
+            reason = "User confirmation is required before execution."
+            
+        else:
+            reason = "Operation is blocked by the security policy."
+            
+        result = SafetyResult(
+            decision=decision,
+            risk_level=risk_level,
+            reason=reason,
+            operation=normalized,
+        )
+        
+        logger.info(
+            "Safety evaluation completed: operation={}, risk={}, decision={}",
+            normalized,
+            risk_level.value,
+            decision.value,
+        )
+        
+        return result
+    
+safety_engine = SafetyEngine()

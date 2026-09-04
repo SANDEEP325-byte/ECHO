@@ -1,17 +1,8 @@
 from services.memory.database import get_connection
-import traceback
 
 
 class FactMemory:
     def save_fact(self, key: str, value: str) -> None:
-        print(f"\n========== FACT WRITE ==========")
-        print(f"key={key!r}")
-        print(f"value={value!r}")
-
-        if key == "preferred_name":
-            print("========== PREFERRED NAME TRACEBACK ==========")
-            print("".join(traceback.format_stack()))
-        
         with get_connection() as connection:
             connection.execute(
                 """

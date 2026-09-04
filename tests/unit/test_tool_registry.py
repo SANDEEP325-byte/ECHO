@@ -393,3 +393,69 @@ def test_tool_registry_execute_returns_failed_tool_result():
     assert result.tool_name == "unknown_tool"
     assert result.result is None
     assert result.error == "Unknown tool: unknown_tool"
+    
+def test_tool_registry_returns_failed_result_when_tool_execution_raises():
+    class FailingTool(FakeTool):
+        def execute(self, value: str) -> str:
+            raise RuntimeError("Tool execution failed.")
+
+    registry = ToolRegistry()
+    registry.register(FailingTool("failing_tool"))
+
+    result = registry.execute(
+        "failing_tool",
+        value="hello",
+    )
+
+    assert result.success is False
+    assert result.tool_name == "failing_tool"
+    assert result.result is None
+    assert result.error == "Tool execution failed."
+    
+def test_registry_rejects_tool_without_definition():
+    class InvalidTool(Tool):
+        name = "invalid_tool"
+        description = "Invalid tool."
+
+        def execute(self, **kwargs):
+            return "result"
+
+    registry = ToolRegistry()
+
+    with pytest.raises(AttributeError):
+        registry.register(InvalidTool())
+        
+def test_registry_rejects_mismatched_tool_definition_name():
+    class InvalidTool(Tool):
+        name = "calculator"
+        description = "Invalid tool."
+
+        def __init__(self):
+            self.definition = ToolDefinition(
+                name="wrong_name",
+                description="Invalid tool.",
+            )
+
+        def execute(self, **kwargs):
+            return "result"
+
+    registry = ToolRegistry()
+
+    with pytest.raises(ValueError):
+        registry.register(InvalidTool())
+        
+def test_registry_rejects_invalid_tool_definition_type():
+    class InvalidTool(Tool):
+        name = "invalid_tool"
+        description = "Invalid tool."
+
+        def __init__(self):
+            self.definition = "not a ToolDefinition"
+
+        def execute(self, **kwargs):
+            return "result"
+
+    registry = ToolRegistry()
+
+    with pytest.raises(TypeError):
+        registry.register(InvalidTool())

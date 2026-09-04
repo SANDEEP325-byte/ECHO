@@ -2,7 +2,7 @@ import pytest
 
 from services.brain.gateway import AIGateway
 from services.memory.conversation import Message
-
+from services.brain.prompt_builder import prompt_builder
 
 class FakeResponse:
     def __init__(self, data=None, status_code=200):
@@ -37,60 +37,47 @@ class FakeAsyncClient:
         return self.response
 
 
-def test_gateway_builds_prompt_with_messages():
+@pytest.mark.anyio
+async def test_gateway_uses_prompt_builder(monkeypatch):
+    gateway = AIGateway()
+
     messages = [
-        Message(
-            role="system",
-            content="User's name is Sandeep.",
-        ),
         Message(
             role="user",
             content="Hello ECHO",
         ),
-        Message(
-            role="assistant",
-            content="Hello! How can I help?",
-        ),
     ]
 
-    prompt = AIGateway._build_prompt(messages)
+    expected_prompt = "BUILT PROMPT"
 
-    assert "You are ECHO, a personal AI assistant." in prompt
-    assert "User's name is Sandeep." in prompt
-    assert "User: Hello ECHO" in prompt
-    assert "ECHO: Hello! How can I help?" in prompt
-    assert "Answer only the latest user message." in prompt
-
-
-def test_gateway_builds_prompt_with_tool_result():
-    messages = [
-        Message(
-            role="user",
-            content="What is 25 * 4?",
-        ),
-    ]
-
-    prompt = AIGateway._build_prompt(
+    def fake_build(
         messages,
-        tool_result="100",
+        tool_result=None,
+        tools=None,
+    ):
+        assert messages[0].content == "Hello ECHO"
+        assert tool_result is None
+        assert tools is None
+
+        return expected_prompt
+
+    monkeypatch.setattr(
+        prompt_builder,
+        "build",
+        fake_build,
     )
 
-    assert "Tool result: 100" in prompt
-    assert "Use this result as the factual answer." in prompt
-    assert "Do not recalculate or change the tool result." in prompt
+    fake_client = FakeAsyncClient()
 
-def test_gateway_builds_prompt_without_tool_result():
-    messages = [
-        Message(
-            role="user",
-            content="Hello ECHO",
-        ),
-    ]
+    monkeypatch.setattr(
+        "services.brain.gateway.httpx.AsyncClient",
+        lambda timeout: fake_client,
+    )
 
-    prompt = AIGateway._build_prompt(messages)
+    response = await gateway.generate(messages)
 
-    assert "Tool result:" not in prompt
-
+    assert response == "Hello from ECHO."
+    assert fake_client.last_json["prompt"] == expected_prompt
 
 @pytest.mark.anyio
 async def test_gateway_generate_returns_ollama_response(monkeypatch):

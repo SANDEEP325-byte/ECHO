@@ -56,7 +56,7 @@ class CalculatorTool(Tool):
         
         if isinstance(node, ast.UnaryOp):
             if isinstance(node.op, ast.USub):
-                return self._evaluate(node.operand)
+                return -self._evaluate(node.operand)
             
         raise ValueError("Invalid mathematical expression.")
     

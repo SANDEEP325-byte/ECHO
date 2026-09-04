@@ -38,3 +38,6 @@ Thumbs.db
 data/
 
 docs/
+
+__pychach__/
+*.py[cod]

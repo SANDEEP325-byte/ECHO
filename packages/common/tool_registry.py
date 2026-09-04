@@ -2,6 +2,7 @@ from typing import Any
 
 from packages.interfaces.tool import Tool
 from packages.interfaces.tool_result import ToolResult
+from packages.interfaces.tool_schema import ToolDefinition
 
 class ToolRegistry:
     """Registry containing all available ECHO tools."""
@@ -10,6 +11,22 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
+        if not hasattr(tool, "definition"):
+            raise AttributeError(
+                f"Tool '{tool.name}' must define a ToolDefinition."
+            )
+
+        if not isinstance(tool.definition, ToolDefinition):
+            raise TypeError(
+                f"Tool '{tool.name}' definition must be a ToolDefinition."
+            )
+
+        if tool.name != tool.definition.name:
+            raise ValueError(
+                f"Tool name '{tool.name}' does not match "
+                f"definition name '{tool.definition.name}'."
+            )
+
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool | None:

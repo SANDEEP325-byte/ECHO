@@ -297,3 +297,82 @@ def test_tool_router_rejects_unknown_intent():
             "weather",
             "What is the weather?",
         )
+        
+def test_tool_router_executes_calculator_for_intent():
+    router = ToolRouter()
+
+    result = router.execute_for_intent(
+        "calculator",
+        "What is 25 * 4?",
+    )
+
+    assert result == 100
+    
+def test_tool_router_rejects_invalid_calculation_for_intent():
+    router = ToolRouter()
+
+    with pytest.raises(ValueError, match="No valid calculation found"):
+        router.execute_for_intent(
+            "calculator",
+            "Hello ECHO",
+        )
+        
+def test_tool_router_extracts_calculation_with_question_mark():
+    router = ToolRouter()
+
+    assert router.extract_calculation(
+        "What is 25 + 5?"
+    ) == "25 + 5"
+
+
+def test_tool_router_extracts_calculation_case_insensitively():
+    router = ToolRouter()
+
+    assert router.extract_calculation(
+        "CALCULATE 25 * 4"
+    ) == "25 * 4"
+
+
+def test_tool_router_rejects_invalid_calculation():
+    router = ToolRouter()
+
+    assert router.extract_calculation(
+        "What is twenty plus five?"
+    ) is None
+
+
+def test_tool_router_supports_power_expression():
+    router = ToolRouter()
+
+    result = router.execute_tool(
+        "calculator",
+        "2 ^ 3",
+    )
+
+    assert result == 8
+
+
+def test_tool_router_rejects_empty_calculation():
+    router = ToolRouter()
+
+    with pytest.raises(ValueError, match="No valid calculation found"):
+        router.execute_tool(
+            "calculator",
+            "",
+        )
+
+
+def test_tool_router_rejects_invalid_calculator_message():
+    router = ToolRouter()
+
+    with pytest.raises(ValueError, match="No valid calculation found"):
+        router.execute_tool(
+            "calculator",
+            "Hello ECHO",
+        )
+
+
+def test_tool_router_normalizes_tool_name_lookup():
+    router = ToolRouter()
+
+    assert router.is_tool_registered("calculator")

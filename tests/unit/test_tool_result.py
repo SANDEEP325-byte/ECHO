@@ -25,3 +25,22 @@ def test_tool_result_failure():
     assert result.success is False
     assert result.result is None
     assert result.error == "Invalid expression."
+    
+def test_tool_result_rejects_empty_tool_name():
+    try:
+        ToolResult(
+            tool_name="",
+        )
+        assert False
+    except ValueError:
+        pass
+    
+def test_tool_result_rejects_non_boolean_success():
+    try:
+        ToolResult(
+            tool_name="calculator",
+            success="yes",
+        )
+        assert False
+    except TypeError:
+        pass

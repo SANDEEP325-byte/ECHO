@@ -1,8 +1,10 @@
 from typing import Any
+
 import httpx
 
 from services.configuration.settings import settings
 from services.memory.conversation import Message
+from services.brain.prompt_builder import prompt_builder
 
 class AIGateway:
     """Gateway between ECHO and the configured local AI model."""
@@ -13,7 +15,7 @@ class AIGateway:
         tool_result: str | None = None,
         tools: list[dict[str, Any]] | None = None,
     ) -> str:
-        prompt = self._build_prompt(
+        prompt = prompt_builder.build(
             messages,
             tool_result=tool_result,
             tools=tools,
@@ -36,74 +38,5 @@ class AIGateway:
         data: dict[str, Any] = response.json()
 
         return str(data["response"])
-
-    @staticmethod
-    def _build_prompt(
-        messages: list[Message],
-        tool_result: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-    ) -> str:
-
-        lines: list[str] = [
-            "You are ECHO, a personal AI assistant.",
-            "Your name is ECHO.",
-            "You are helpful, friendly, and conversational.",
-            "Always identify yourself as ECHO when asked who you are.",
-            "Answer the user's latest message directly.",
-            "Do not repeat the user's question.",
-            "Do not invent information.",
-            "Keep simple answers concise but natural.",
-            "For greetings, respond naturally and warmly.",
-        ]
-
-        if tools:
-            lines.extend(
-                [
-                    "",
-                    "Available tools:",
-                ]
-            )
-
-            for tool in tools:
-                lines.append(
-                    f"- {tool['name']}: {tool['description']}"
-                )
-
-        lines.extend(
-            [
-                "",
-                "Conversation:",
-            ]
-        )
-
-        for message in messages:
-            if message.role == "system":
-                lines.append(message.content)
-
-            elif message.role == "user":
-                lines.append(f"User: {message.content}")
-
-            elif message.role == "assistant":
-                lines.append(f"ECHO: {message.content}")
-
-        if tool_result is not None:
-            lines.extend(
-                [
-                    "",
-                    f"Tool result: {tool_result}",
-                    "Use this result as the factual answer.",
-                    "Do not recalculate or change the tool result.",
-                ]
-            )
-
-        lines.extend(
-            [
-                "",
-                "Answer only the latest user message.",
-                "ECHO:",
-            ]
-        )
-
-        return "\n".join(lines)
 
 ai_gateway = AIGateway()
