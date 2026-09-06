@@ -89,7 +89,22 @@ class ExecutionEngine:
                     ),
                 )
 
-            safety_result = self.safety_engine.evaluate(tool_name)
+            try:
+                safety_result = self.safety_engine.evaluate(tool_name)
+            except Exception as exc:
+                logger.error(
+                    "Request {} step {} safety evaluation failed: {}",
+                    request.request_id,
+                    step.step_number,
+                    exc,
+                )
+
+                request.status = RequestStatus.FAILED
+
+                return ExecutionResult(
+                    success=False,
+                    error=str(exc),
+                )
 
             if safety_result.decision == PermissionDecision.BLOCK:
                 request.status = RequestStatus.FAILED

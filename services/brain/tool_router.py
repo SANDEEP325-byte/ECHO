@@ -183,10 +183,20 @@ class ToolRouter:
                 expression = expression.replace("^", "**")
                 kwargs["expression"] = expression
 
-        result = tool_registry.execute(
-            tool_name,
-            **kwargs,
-        )
+        try:
+            result = tool_registry.execute(
+                tool_name,
+                **kwargs,
+            )
+        except Exception as exc:
+            logger.error(
+                "Tool execution failed for '{}': {}",
+                tool_name,
+                exc,
+            )
+            raise RuntimeError(
+                f"Tool execution failed: {exc}"
+            ) from exc
 
         if isinstance(result, ToolResult):
             if not result.success:

@@ -44,9 +44,15 @@ async def health() -> dict[str, str]:
 async def chat(request: ChatRequest) -> ChatResponse:
     logger.info("Received chat request")
     
-    response = await echo_brain.process(
-        request.message
-    )
+    try:
+        response = await echo_brain.process(
+            request.message
+        )
+    except Exception as exc:
+        logger.error("Chat request failed: {}", exc)
+        return ChatResponse(
+            response="I couldn't process your request because an internal component failed."
+        )
 
     logger.info("AI response generated")
 

@@ -1,3 +1,4 @@
+import pytest
 from packages.interfaces.execution import ExecutionResult
 from packages.interfaces.plan import  Plan, PlanStep
 from packages.interfaces.request import Request, RequestStatus
@@ -13,41 +14,41 @@ def test_execution_result_represents_success():
         success = True,
         result= "done",
     )
-    
+
     assert result.success is True
     assert result.result == "done"
     assert result.error is None
-    
+
 def test_execution_resullt_represents_failure():
     result = ExecutionResult(
         success= False,
         error= "Permission denied",
     )
-    
+
     assert result.success is False
     assert result.error == "Permission denied"
-    
+
 def test_execution_without_plan_succeeds():
     engine = ExecutionEngine()
-    
+
     request = Request(
         user_input="What is Python?"
     )
-    
+
     plan = Plan(
         requires_planning=False,
         steps=[],
     )
-    
+
     result =  engine.execute(
         request,
         plan,
     )
-    
+
     assert isinstance(result, ExecutionResult)
     assert result.success is True
     assert request.status == RequestStatus.EXECUTING
-    
+
 def test_execution_fails_when_required_tool_is_unavailable():
     engine = ExecutionEngine()
 
@@ -81,16 +82,16 @@ def test_execution_fails_when_required_tool_is_unavailable():
     assert result.success is False
     assert result.error == "Unknown or unsupported tool: terminal"
     assert request.status == RequestStatus.FAILED
-    
+
 def test_exection_preserves_request_id():
     engine = ExecutionEngine()
-    
+
     request = Request(
         user_input="Run a task"
     )
-    
+
     request_id = request.request_id
-    
+
     plan = Plan(
         requires_planning=True,
         steps=[
@@ -100,14 +101,14 @@ def test_exection_preserves_request_id():
             ),
         ],
     )
-    
+
     engine.execute(
         request,
         plan
     )
-    
+
     assert request.request_id == request_id
-    
+
 def test_execution_uses_tool_defined_by_each_plan_step():
     engine = ExecutionEngine()
 
@@ -179,7 +180,7 @@ def test_execution_skips_steps_without_tool():
     assert len(result.result) == 2
     assert result.result[0] == 15
     assert result.result[1] == "Step 2 completed."
-    
+
 def test_execution_marks_request_completed_on_success():
     engine = ExecutionEngine()
 
@@ -207,7 +208,7 @@ def test_execution_marks_request_completed_on_success():
 
     assert result.success is True
     assert request.status == RequestStatus.COMPLETED
-    
+
 class FakeSafetyEngine:
     def __init__(
         self,
@@ -372,7 +373,7 @@ def test_execution_blocks_sensitive_operation_without_confirmation():
         "User confirmation is required before executing 'delete_file'."
     )
     assert request.status == RequestStatus.FAILED
-    
+
 # CRITICAL OPERATION
 def test_execution_blocks_critical_operation_without_confirmation():
     engine = ExecutionEngine()
@@ -404,7 +405,7 @@ def test_execution_blocks_critical_operation_without_confirmation():
         "User confirmation is required before executing 'format_drive'."
     )
     assert request.status == RequestStatus.FAILED
-    
+
 # SAFE OPERATION
 def test_execution_allows_safe_operation():
     engine = ExecutionEngine()
@@ -434,7 +435,7 @@ def test_execution_allows_safe_operation():
     assert result.success is True
     assert result.result == [15]
     assert request.status == RequestStatus.COMPLETED
-    
+
 def test_execution_evaluates_security_once_per_tool_step():
     class CountingSafetyEngine:
         def __init__(self):
@@ -502,3 +503,35 @@ def test_execution_evaluates_security_once_per_tool_step():
         "calculator",
         "time",
     ]
+
+def test_execution_propagates_safety_engine_exception():
+    class FailingSafetyEngine:
+        def evaluate(self, operation: str) -> SafetyResult:
+            raise RuntimeError("Safety engine crashed.")
+
+    engine = ExecutionEngine(
+        safety_engine=FailingSafetyEngine(),
+    )
+
+    request = Request(
+        user_input="Calculate 10 + 5",
+    )
+
+    request.selected_tools = ["calculator"]
+
+    plan = Plan(
+        requires_planning=True,
+        steps=[
+            PlanStep(
+                step_number=1,
+                description="Perform calculation.",
+                tool_name="calculator",
+            ),
+        ],
+    )
+
+    result = engine.execute(request, plan)
+
+    assert result.success is False
+    assert result.error == "Safety engine crashed."
+    assert request.status == RequestStatus.FAILED

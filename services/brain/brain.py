@@ -492,10 +492,20 @@ class ECHOBrain:
                 else:
                     response = tool_result
             else:
-                response = await ai_gateway.generate(
-                    messages,
-                    tools=tool_router.get_available_tools(),
-                )
+                try:
+                    response = await ai_gateway.generate(
+                        messages,
+                        tools=tool_router.get_available_tools(),
+                    )
+                except Exception as exc:
+                    request.status = RequestStatus.FAILED
+                    request.error = str(exc)
+                    logger.error(
+                        "AI Gateway failed for request {}: {}",
+                        request.request_id,
+                        exc,
+                    )
+                    return "I couldn't process your request because an internal component failed."
 
         persistent_memory.save_message(
             role="user",

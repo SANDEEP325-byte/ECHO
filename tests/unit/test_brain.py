@@ -2518,3 +2518,19 @@ async def test_brain_does_not_complete_when_verification_raises(monkeypatch):
     assert response == (
         "I couldn't process your request because an internal component failed."
     )
+
+@pytest.mark.anyio
+async def test_brain_handles_ai_gateway_exception(monkeypatch):
+    brain = ECHOBrain()
+
+    async def fake_generate(messages, tools=None):
+        raise RuntimeError("AI Gateway crashed.")
+
+    monkeypatch.setattr(
+        "services.brain.brain.ai_gateway.generate",
+        fake_generate,
+    )
+
+    result = await brain.process("Tell me something interesting.")
+
+    assert result == "I couldn't process your request because an internal component failed."
