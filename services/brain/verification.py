@@ -139,6 +139,35 @@ class VerificationEngine:
                 target = Path(meta["path"])
                 if target.exists():
                     return f"Verification failed: deleted target '{target}' still exists."
+
+            elif op == "open_file":
+                target = Path(meta["path"])
+                if not target.is_file():
+                    return f"Verification failed: target file '{target}' does not exist."
+                if not meta.get("verified"):
+                    return "Verification failed: open_file operation was not verified."
+
+            elif op == "open_folder":
+                target = Path(meta["path"])
+                if not target.is_dir():
+                    return f"Verification failed: target directory '{target}' does not exist."
+                if not meta.get("verified"):
+                    return "Verification failed: open_folder operation was not verified."
+
+            elif op == "open_application":
+                target = Path(meta["path"])
+                if not target.is_file():
+                    return f"Verification failed: application executable '{target}' does not exist."
+                if not meta.get("verified"):
+                    return "Verification failed: open_application operation was not verified."
+
+            elif op in ("execute_command", "run_command"):
+                if meta.get("timed_out"):
+                    return "Verification failed: command execution timed out."
+                if meta.get("status") == "failed" and meta.get("exit_code") is None:
+                    return "Verification failed: process execution failed without exit code."
+                if not meta.get("verified"):
+                    return "Verification failed: command operation was not verified."
         except Exception as exc:
             return f"Verification failed during filesystem check: {exc}"
 

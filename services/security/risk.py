@@ -12,6 +12,8 @@ class RiskClassifier:
         "read_file",
         "list_folder",
         "create_folder",
+        "open_file",
+        "open_folder",
         "search",
         "weather",
     }
@@ -22,6 +24,7 @@ class RiskClassifier:
         "open_chrome",
         "run_npm",
         "copy_file",
+        "open_application",
     }
 
     SENSITIVE_OPERATIONS = {
@@ -32,6 +35,8 @@ class RiskClassifier:
         "move_file",
         "create_file",
         "git_push",
+        "execute_command",
+        "run_command",
     }
 
     CRITICAL_OPERATIONS = {

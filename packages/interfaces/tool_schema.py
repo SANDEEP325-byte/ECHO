@@ -14,6 +14,8 @@ class ToolParameter:
         "integer",
         "number",
         "boolean",
+        "array",
+        "object",
     }
 
     def __post_init__(self) -> None:

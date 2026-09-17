@@ -17,8 +17,22 @@ class FilesystemService:
     system subprocesses, or unvalidated user paths.
     """
 
-    def __init__(self, policy: DesktopSecurityPolicy | None = None) -> None:
+    def __init__(
+        self,
+        policy: DesktopSecurityPolicy | None = None,
+        os_launcher: Any = None,
+    ) -> None:
         self.policy = policy or desktop_security_policy
+        self.os_launcher = os_launcher
+
+    def _launch(self, target: Path) -> None:
+        """Launch target using the configured OS launcher or Windows os.startfile."""
+        if self.os_launcher is not None:
+            self.os_launcher(str(target))
+        elif hasattr(os, "startfile"):
+            os.startfile(str(target))
+        else:
+            raise NotImplementedError("OS launch requires Windows os.startfile or an injected launcher.")
 
     def read_file(
         self,
@@ -332,6 +346,62 @@ class FilesystemService:
             "operation": "delete_file",
             "path": str(resolved),
             "status": "deleted",
+            "verified": True,
+        }
+
+    def open_file(self, path: str | Path) -> dict[str, Any]:
+        """Open an authorized file using its default associated application.
+
+        Executable and script files are strictly blocked.
+
+        Args:
+            path: Target file path.
+
+        Returns:
+            Operation metadata dictionary.
+        """
+        resolved = self.policy.validate_or_raise(path, OperationType.OPEN)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+
+        if not resolved.is_file():
+            raise IsADirectoryError(f"Target is a directory, not a file: {path}")
+
+        logger.info("Opening file via associated application: {}", resolved)
+        self._launch(resolved)
+
+        return {
+            "operation": "open_file",
+            "path": str(resolved),
+            "status": "opened",
+            "verified": True,
+        }
+
+    def open_folder(self, path: str | Path) -> dict[str, Any]:
+        """Open an authorized folder in Windows Explorer.
+
+        Args:
+            path: Target folder path.
+
+        Returns:
+            Operation metadata dictionary.
+        """
+        resolved = self.policy.validate_or_raise(path, OperationType.OPEN)
+
+        if not resolved.exists():
+            raise FileNotFoundError(f"Folder not found: {path}")
+
+        if not resolved.is_dir():
+            raise NotADirectoryError(f"Target is a file, not a directory: {path}")
+
+        logger.info("Opening folder in file explorer: {}", resolved)
+        self._launch(resolved)
+
+        return {
+            "operation": "open_folder",
+            "path": str(resolved),
+            "status": "opened",
             "verified": True,
         }
 

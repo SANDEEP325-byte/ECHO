@@ -18,6 +18,7 @@ class OperationType(str, Enum):
     RENAME = "rename"
     DELETE = "delete"
     LIST = "list"
+    OPEN = "open"
 
 
 class PolicyErrorCode(str, Enum):
@@ -91,6 +92,28 @@ class DesktopSecurityPolicy:
         ".key",
         ".pfx",
         ".p12",
+    }
+
+    # Blocked extensions when opening files (prevent code/script execution via association)
+    BLOCKED_OPEN_EXTENSIONS = {
+        ".exe",
+        ".bat",
+        ".cmd",
+        ".com",
+        ".ps1",
+        ".vbs",
+        ".vbe",
+        ".js",
+        ".jse",
+        ".wsf",
+        ".wsh",
+        ".msc",
+        ".msi",
+        ".scr",
+        ".pif",
+        ".reg",
+        ".cpl",
+        ".hta",
     }
 
     def __init__(
@@ -328,13 +351,23 @@ class DesktopSecurityPolicy:
             )
 
         # 4. Operation-Specific Checks
-        if operation == OperationType.DELETE:
-            # Cannot delete the authorized root itself
+        if operation == OperationType.OPEN:
+            if resolved_path.suffix.lower() in self.BLOCKED_OPEN_EXTENSIONS:
+                return PolicyCheckResult(
+                    allowed=False,
+                    reason="Opening executable, batch, or script files is strictly prohibited.",
+                    error_code=PolicyErrorCode.SENSITIVE_FILE,
+                    operation=operation,
+                    target_path=str(resolved_path),
+                )
+
+        if operation in (OperationType.DELETE, OperationType.MOVE, OperationType.RENAME):
+            # Cannot delete, move, or rename the authorized root itself
             if matched_root is not None:
                 if [p.lower() for p in resolved_path.parts] == [r.lower() for r in matched_root.parts]:
                     return PolicyCheckResult(
                         allowed=False,
-                        reason="Deleting an authorized sandbox root folder is forbidden.",
+                        reason=f"Operating ({operation.value}) on an authorized sandbox root folder is forbidden.",
                         error_code=PolicyErrorCode.ROOT_DELETION_FORBIDDEN,
                         operation=operation,
                         target_path=str(resolved_path),

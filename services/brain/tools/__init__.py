@@ -4,6 +4,8 @@ from services.brain.tools.calculator import calculator_tool
 from services.brain.tools.time import time_tool
 from services.brain.tools.date import date_tool
 from services.brain.tools.filesystem_tools import ALL_FILESYSTEM_TOOLS
+from services.brain.tools.launch_tools import ALL_LAUNCH_TOOLS
+from services.brain.tools.command_tools import ALL_COMMAND_TOOLS
 
 
 def register_builtin_tools() -> None:
@@ -14,6 +16,8 @@ def register_builtin_tools() -> None:
         time_tool,
         date_tool,
         *ALL_FILESYSTEM_TOOLS,
+        *ALL_LAUNCH_TOOLS,
+        *ALL_COMMAND_TOOLS,
     ]
 
     for tool in tools:
