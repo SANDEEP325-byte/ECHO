@@ -75,3 +75,35 @@ class SemanticSearchResponse(BaseModel):
 class MemoryActionResponse(BaseModel):
     success: bool = True
     message: str = ""
+
+
+# Action Confirmation Schemas
+
+class ActionConfirmRequest(BaseModel):
+    action_id: str = Field(min_length=1)
+
+
+class ActionCancelRequest(BaseModel):
+    action_id: str = Field(min_length=1)
+
+
+class ActionConfirmationResponse(BaseModel):
+    success: bool
+    status: str
+    action_id: str | None = None
+    message: str
+    result: Any = None
+    error: str | None = None
+    pending_action: dict[str, Any] | None = None
+
+
+class PendingActionDetailResponse(BaseModel):
+    action_id: str
+    tool: str
+    step_number: int | None = None
+    arguments: dict[str, Any]
+    risk_level: str
+    created_at: float
+    expires_at: float
+    state: str
+    request_id: str | None = None

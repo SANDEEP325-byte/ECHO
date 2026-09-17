@@ -1,7 +1,14 @@
 from fastapi import FastAPI
 
 from services.api.memory import memory_router
-from services.api.schemas import ChatRequest, ChatResponse
+from services.api.schemas import (
+    ActionCancelRequest,
+    ActionConfirmationResponse,
+    ActionConfirmRequest,
+    ChatRequest,
+    ChatResponse,
+    PendingActionDetailResponse,
+)
 from services.configuration.settings import settings
 from services.logging.logger import logger
 from services.memory.conversation import conversation_memory
@@ -60,3 +67,53 @@ async def chat(request: ChatRequest) -> ChatResponse:
     logger.info("AI response generated")
 
     return ChatResponse(response=response)
+
+
+@app.post("/actions/confirm", response_model=ActionConfirmationResponse)
+async def confirm_action(req: ActionConfirmRequest) -> ActionConfirmationResponse:
+    logger.info("Received action confirmation request: action_id={}", req.action_id)
+    res = echo_brain.confirm_action(req.action_id)
+    return ActionConfirmationResponse(
+        success=res.success,
+        status=res.status.value,
+        action_id=res.action_id,
+        message=res.message,
+        result=res.result,
+        error=res.error,
+        pending_action=res.pending_action,
+    )
+
+
+@app.post("/actions/cancel", response_model=ActionConfirmationResponse)
+async def cancel_action(req: ActionCancelRequest) -> ActionConfirmationResponse:
+    logger.info("Received action cancellation request: action_id={}", req.action_id)
+    res = echo_brain.cancel_action(req.action_id)
+    return ActionConfirmationResponse(
+        success=res.success,
+        status=res.status.value,
+        action_id=res.action_id,
+        message=res.message,
+        result=res.result,
+        error=res.error,
+        pending_action=res.pending_action,
+    )
+
+
+@app.get("/actions/{action_id}", response_model=PendingActionDetailResponse)
+async def get_action_detail(action_id: str) -> PendingActionDetailResponse:
+    action = echo_brain.get_pending_action(action_id)
+    if action is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Pending action not found.")
+    d = action.to_dict()
+    return PendingActionDetailResponse(
+        action_id=d["action_id"],
+        tool=d["tool"],
+        step_number=d.get("step_number"),
+        arguments=d["arguments"],
+        risk_level=d["risk_level"],
+        created_at=d["created_at"],
+        expires_at=d["expires_at"],
+        state=d["state"],
+        request_id=d.get("request_id"),
+    )

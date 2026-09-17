@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import re
 
+from packages.interfaces.pending_action import (
+    ConfirmationResult,
+    PendingAction,
+)
 from packages.interfaces.request import Request, RequestStatus
 from services.brain.context_builder import context_builder
 from services.brain.execution import execution_engine
@@ -109,6 +113,31 @@ class ECHOBrain:
 
     async def process(self, user_message: str) -> str:
         logger.info("Brain processing request")
+
+        trimmed = user_message.strip()
+        if trimmed.startswith("/confirm "):
+            target_id = trimmed[len("/confirm "):].strip()
+            confirm_res = self.confirm_action(target_id)
+            if confirm_res.success:
+                resp_text = f"Action '{target_id}' confirmed and executed successfully: {confirm_res.result}"
+            else:
+                resp_text = f"Action confirmation failed: {confirm_res.message}"
+            if self.memory_manager is not None:
+                self.memory_manager.save_message(role="user", content=user_message)
+                self.memory_manager.save_message(role="assistant", content=resp_text)
+            return resp_text
+
+        if trimmed.startswith("/cancel "):
+            target_id = trimmed[len("/cancel "):].strip()
+            cancel_res = self.cancel_action(target_id)
+            if cancel_res.success:
+                resp_text = f"Action '{target_id}' has been cancelled."
+            else:
+                resp_text = f"Action cancellation failed: {cancel_res.message}"
+            if self.memory_manager is not None:
+                self.memory_manager.save_message(role="user", content=user_message)
+                self.memory_manager.save_message(role="assistant", content=resp_text)
+            return resp_text
 
         request = Request(
             user_input=user_message,
@@ -423,6 +452,20 @@ class ECHOBrain:
 
         logger.info("Brain completed request")
         return response
+
+    def confirm_action(self, action_id: str) -> ConfirmationResult:
+        """Confirm and resume an unexpired pending action through the execution pipeline."""
+        logger.info("ECHOBrain confirming action: {}", action_id)
+        return execution_engine.resume_pending_action(action_id)
+
+    def cancel_action(self, action_id: str) -> ConfirmationResult:
+        """Cancel a pending action, permanently preventing execution."""
+        logger.info("ECHOBrain cancelling action: {}", action_id)
+        return execution_engine.cancel_pending_action(action_id)
+
+    def get_pending_action(self, action_id: str) -> PendingAction | None:
+        """Retrieve details of a pending action by its identifier."""
+        return execution_engine.pending_action_manager.get_action(action_id)
 
 
 echo_brain = ECHOBrain(

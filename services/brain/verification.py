@@ -1,16 +1,510 @@
+import os
+from pathlib import Path
+import tempfile
+from typing import Any
+
 from packages.interfaces.execution import ExecutionResult
 from packages.interfaces.request import Request, RequestStatus
-from packages.interfaces.verification import VerificationResult
+from packages.interfaces.verification import (
+    VerificationDetail,
+    VerificationResult,
+    VerificationStatus,
+)
+from services.desktop.policy import (
+    DesktopSecurityPolicy,
+    desktop_security_policy,
+    OperationType,
+    SecurityPolicyError,
+)
 from services.logging.logger import logger
 
+
 class VerificationEngine:
-    """Verifies whether an ECHO request can be considered complete."""
+    """Verifies whether an ECHO execution post-condition can be verified."""
+
+    def __init__(self, desktop_policy: DesktopSecurityPolicy | None = None) -> None:
+        self.policy = desktop_policy
+
+    def _validate_safe_path(
+        self,
+        raw_path: str | Path | None,
+        operation: OperationType = OperationType.READ,
+    ) -> tuple[bool, str, Path | None]:
+        """Validate target path against the sandbox policy without raising.
+
+        Guarantees:
+        1. Explicit path canonicalization.
+        2. Strict rejection of null bytes, UNC paths, and traversal escapes.
+        3. Strict rejection of protected locations and sensitive files.
+        4. Enforcement of sandbox root boundaries.
+        """
+        if raw_path is None:
+            return False, "Target path is missing.", None
+
+        active_policy = self.policy or desktop_security_policy
+
+        try:
+            resolved = active_policy.normalize_path(raw_path)
+        except SecurityPolicyError as spe:
+            return False, spe.reason, None
+        except Exception as exc:
+            return False, f"Invalid path syntax: {exc}", None
+
+        # 1. Protected System Location check
+        if active_policy._is_protected_location(resolved):
+            return False, "Access to system or root drive locations is strictly prohibited.", None
+
+        # 2. Sensitive File / Credentials check
+        if active_policy._is_sensitive_file(resolved):
+            return False, "Access to credentials, secrets, or environment configuration is prohibited.", None
+
+        # 3. Sandbox Containment Check
+        for root in active_policy.authorized_roots:
+            if active_policy._is_component_contained(resolved, root):
+                return True, "Path authorized within sandbox.", resolved
+
+        # If using global default policy, permit temporary test directory
+        if self.policy is None:
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            if active_policy._is_component_contained(resolved, temp_dir):
+                return True, "Path authorized within temporary test workspace.", resolved
+
+        return False, "Target path is outside the authorized desktop sandbox.", None
+
+    def _verify_operation_postcondition(self, meta: dict[str, Any]) -> VerificationDetail:
+        """Inspect and verify the post-condition state for an individual operation."""
+        op = meta.get("operation", "unknown")
+
+        try:
+            if op == "create_file":
+                raw_path = meta.get("path")
+                is_safe, reason, target = self._validate_safe_path(raw_path, OperationType.READ)
+                if not is_safe or target is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: {reason}",
+                        expected="Target file resides within authorized sandbox",
+                        observed=f"Path safety violation: {reason}",
+                    )
+
+                if not target.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: created file '{target.name}' does not exist.",
+                        expected="File exists at target path",
+                        observed="Target does not exist",
+                    )
+
+                if not target.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: created file '{target.name}' is not a regular file.",
+                        expected="Target is a regular file",
+                        observed="Target exists but is not a regular file",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Created file '{target.name}' verified successfully.",
+                    expected="Target file exists as a regular file",
+                    observed="Regular file exists at target path",
+                )
+
+            elif op == "create_folder":
+                raw_path = meta.get("path")
+                is_safe, reason, target = self._validate_safe_path(raw_path, OperationType.READ)
+                if not is_safe or target is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: {reason}",
+                        expected="Target directory resides within authorized sandbox",
+                        observed=f"Path safety violation: {reason}",
+                    )
+
+                if not target.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: created directory '{target.name}' does not exist.",
+                        expected="Directory exists at target path",
+                        observed="Target does not exist",
+                    )
+
+                if not target.is_dir():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: created directory '{target.name}' is not a directory.",
+                        expected="Target is a directory",
+                        observed="Target exists but is not a directory",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Created directory '{target.name}' verified successfully.",
+                    expected="Target directory exists",
+                    observed="Directory exists at target path",
+                )
+
+            elif op == "copy_file":
+                raw_src = meta.get("source")
+                raw_dst = meta.get("destination")
+                safe_src, r_src, src = self._validate_safe_path(raw_src, OperationType.READ)
+                safe_dst, r_dst, dst = self._validate_safe_path(raw_dst, OperationType.READ)
+
+                if not safe_src or src is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error on source: {r_src}",
+                        expected="Source resides within authorized sandbox",
+                        observed=f"Path safety violation: {r_src}",
+                    )
+                if not safe_dst or dst is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error on destination: {r_dst}",
+                        expected="Destination resides within authorized sandbox",
+                        observed=f"Path safety violation: {r_dst}",
+                    )
+
+                if not dst.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: copied destination '{dst.name}' does not exist.",
+                        expected="Destination file exists",
+                        observed="Destination does not exist",
+                    )
+
+                if not dst.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: copied destination '{dst.name}' is not a regular file.",
+                        expected="Destination is a regular file",
+                        observed="Destination exists but is not a regular file",
+                    )
+
+                if not src.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: source file '{src.name}' no longer exists after copy.",
+                        expected="Source file remains present after copy",
+                        observed="Source file is missing",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Copied file to '{dst.name}' verified successfully.",
+                    expected="Destination exists and source remains present",
+                    observed="Destination regular file exists and source is present",
+                )
+
+            elif op in ("rename_file", "move_file"):
+                raw_src = meta.get("source")
+                raw_dst = meta.get("destination")
+                safe_src, r_src, src = self._validate_safe_path(raw_src, OperationType.READ)
+                safe_dst, r_dst, dst = self._validate_safe_path(raw_dst, OperationType.READ)
+
+                if not safe_src or src is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error on source: {r_src}",
+                        expected="Source resides within authorized sandbox",
+                        observed=f"Path safety violation: {r_src}",
+                    )
+                if not safe_dst or dst is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error on destination: {r_dst}",
+                        expected="Destination resides within authorized sandbox",
+                        observed=f"Path safety violation: {r_dst}",
+                    )
+
+                if not dst.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: destination '{dst.name}' does not exist.",
+                        expected="Destination path exists",
+                        observed="Destination does not exist",
+                    )
+
+                if src.resolve() != dst.resolve() and src.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: source '{src.name}' still exists after move.",
+                        expected=f"Source path no longer exists after {op}",
+                        observed="Source path still exists",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Operation {op} verified successfully for destination '{dst.name}'.",
+                    expected="Destination exists and source path no longer exists",
+                    observed="Destination exists and source removed",
+                )
+
+            elif op == "delete_file":
+                raw_path = meta.get("path")
+                is_safe, reason, target = self._validate_safe_path(raw_path, OperationType.READ)
+                if not is_safe or target is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: {reason}",
+                        expected="Target path resides within authorized sandbox",
+                        observed=f"Path safety violation: {reason}",
+                    )
+
+                if target.exists():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: deleted target '{target.name}' still exists.",
+                        expected="Target path no longer exists",
+                        observed="Target path still exists",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Deleted target '{target.name}' verified successfully.",
+                    expected="Target path no longer exists",
+                    observed="Target does not exist",
+                )
+
+            elif op in ("read_file", "list_folder"):
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.NOT_APPLICABLE,
+                    message="Verification is not applicable for read-only filesystem operations.",
+                    expected="Read-only operation has no filesystem mutation post-condition",
+                    observed="Read operation completed without state mutation",
+                )
+
+            elif op == "open_file":
+                raw_path = meta.get("path")
+                is_safe, reason, target = self._validate_safe_path(raw_path, OperationType.READ)
+                if not is_safe or target is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: {reason}",
+                        expected="Target file resides within authorized sandbox",
+                        observed=f"Path safety violation: {reason}",
+                    )
+
+                if not target.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: target file '{target.name}' does not exist.",
+                        expected="Target file exists",
+                        observed="Target file does not exist or is not a regular file",
+                    )
+
+                if not meta.get("verified"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Verification failed: open_file operation was not verified.",
+                        expected="OS launch dispatch verified",
+                        observed="OS launch dispatch not verified",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=(
+                        f"Target file '{target.name}' verified and OS launch dispatch confirmed. "
+                        "Application window lifecycle is not verified."
+                    ),
+                    expected="Target file exists and OS launch dispatch successful",
+                    observed="File exists and OS dispatch succeeded; GUI lifecycle unverified",
+                )
+
+            elif op == "open_folder":
+                raw_path = meta.get("path")
+                is_safe, reason, target = self._validate_safe_path(raw_path, OperationType.READ)
+                if not is_safe or target is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: {reason}",
+                        expected="Target directory resides within authorized sandbox",
+                        observed=f"Path safety violation: {reason}",
+                    )
+
+                if not target.is_dir():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: target directory '{target.name}' does not exist.",
+                        expected="Target directory exists",
+                        observed="Target directory does not exist or is not a directory",
+                    )
+
+                if not meta.get("verified"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Verification failed: open_folder operation was not verified.",
+                        expected="OS launch dispatch verified",
+                        observed="OS launch dispatch not verified",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=(
+                        f"Target directory '{target.name}' verified and OS launch dispatch confirmed. "
+                        "File explorer window lifecycle is not verified."
+                    ),
+                    expected="Target directory exists and OS launch dispatch successful",
+                    observed="Directory exists and OS dispatch succeeded; explorer lifecycle unverified",
+                )
+
+            elif op == "open_application":
+                raw_path = meta.get("path")
+                app_name = meta.get("application", "unknown")
+                if not raw_path:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message="Verification failed: missing application executable path in result.",
+                        expected="Verified executable path in result metadata",
+                        observed="Path missing",
+                    )
+
+                target = Path(raw_path)
+                system_root = Path(
+                    os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+                ).resolve()
+                try:
+                    target.resolve(strict=False).relative_to(system_root)
+                except ValueError:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message="Verification failed: application target resides outside trusted system directory.",
+                        expected="Executable resides in trusted system directory",
+                        observed="Executable outside system directory",
+                    )
+
+                if not target.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: application executable '{target.name}' does not exist.",
+                        expected="Application executable exists",
+                        observed="Application executable does not exist",
+                    )
+
+                if not meta.get("verified") or meta.get("status") != "launched":
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Verification failed: open_application operation was not verified.",
+                        expected="Application launch confirmed",
+                        observed="Application launch unconfirmed",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.NOT_APPLICABLE,
+                    message=(
+                        f"Application '{app_name}' launch dispatch completed. "
+                        "Runtime process lifecycle and window state verification are not applicable without unsafe inspection."
+                    ),
+                    expected="Launch dispatch accepted; window and process lifecycle unverified",
+                    observed="Executable verified and launch dispatched; runtime process monitoring is not applicable",
+                )
+
+            elif op in ("execute_command", "run_command"):
+                cmd_family = meta.get("command", "unknown")
+                if meta.get("timed_out"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Verification failed: command execution timed out.",
+                        expected="Command completes within timeout limit",
+                        observed="Command timed out",
+                    )
+
+                if meta.get("status") == "failed" and meta.get("exit_code") is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message="Verification failed: process execution failed without exit code.",
+                        expected="Process completes and returns an integer exit code",
+                        observed="Process launch failed before returning exit code",
+                    )
+
+                if meta.get("exit_code") is not None and meta.get("exit_code") != 0:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: command exited with non-zero exit code {meta.get('exit_code')}.",
+                        expected="Command exits with return code 0",
+                        observed=f"Command exited with return code {meta.get('exit_code')}",
+                    )
+
+                if not meta.get("verified"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Verification failed: command operation was not verified.",
+                        expected="Command execution verified",
+                        observed="Command unverified",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Command '{cmd_family}' post-condition verified (exit code 0).",
+                    expected="Command completes with exit code 0 within timeout and output limits",
+                    observed="Command executed successfully (exit code 0, bounded output)",
+                )
+
+            else:
+                return VerificationDetail(
+                    operation=str(op),
+                    status=VerificationStatus.NOT_APPLICABLE,
+                    message=f"Verification is not applicable for operation '{op}'.",
+                    expected="N/A",
+                    observed="N/A",
+                )
+
+        except Exception as exc:
+            return VerificationDetail(
+                operation=str(op),
+                status=VerificationStatus.VERIFICATION_ERROR,
+                message=f"Verification failed during check: {exc}",
+                expected="Check completes safely",
+                observed=f"Verification check exception: {exc}",
+            )
 
     def verify(
         self,
         request: Request,
         execution_result: ExecutionResult,
     ) -> VerificationResult:
+        """Verify whether an ECHO execution post-condition can be verified."""
         logger.info(
             "Starting verification for request {}",
             request.request_id,
@@ -20,157 +514,110 @@ class VerificationEngine:
 
         if request.error is not None:
             request.status = RequestStatus.FAILED
-
             logger.error(
                 "Verification failed for request {}: {}",
                 request.request_id,
                 request.error,
             )
-
             return VerificationResult(
                 success=False,
+                status=VerificationStatus.NOT_VERIFIED,
                 error=request.error,
             )
 
         if not execution_result.success:
             request.status = RequestStatus.FAILED
-
             error = (
                 execution_result.error
                 or "Verification failed: execution was unsuccessful."
             )
-
             request.error = error
-
             logger.error(
                 "Verification failed for request {}: {}",
                 request.request_id,
                 error,
             )
-
             return VerificationResult(
                 success=False,
+                status=VerificationStatus.NOT_VERIFIED,
                 error=error,
             )
 
         if execution_result.result is None:
             request.status = RequestStatus.FAILED
-
-            error = (
-                "Verification failed: "
-                "execution produced no result."
-            )
-
+            error = "Verification failed: execution produced no result."
             request.error = error
-
             logger.error(
                 "Verification failed for request {}: execution produced no result",
                 request.request_id,
             )
-
             return VerificationResult(
                 success=False,
+                status=VerificationStatus.NOT_VERIFIED,
                 error=error,
             )
 
-        # Filesystem post-condition state verification
         items_to_verify = (
             execution_result.result
             if isinstance(execution_result.result, list)
             else [execution_result.result]
         )
 
+        details: list[VerificationDetail] = []
+        overall_status = VerificationStatus.VERIFIED
+
         for item in items_to_verify:
             if isinstance(item, dict) and "operation" in item:
-                fs_error = self._verify_filesystem_postcondition(item)
-                if fs_error is not None:
+                detail = self._verify_operation_postcondition(item)
+                details.append(detail)
+
+                if detail.status == VerificationStatus.VERIFICATION_ERROR:
                     request.status = RequestStatus.FAILED
-                    request.error = fs_error
+                    request.error = detail.message
                     logger.error(
-                        "Verification failed for request {}: {}",
+                        "Verification error for request {}: {}",
                         request.request_id,
-                        fs_error,
+                        detail.message,
                     )
                     return VerificationResult(
                         success=False,
-                        error=fs_error,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        error=detail.message,
+                        result=execution_result.result,
+                        details=details,
                     )
 
+                if detail.status == VerificationStatus.NOT_VERIFIED:
+                    request.status = RequestStatus.FAILED
+                    request.error = detail.message
+                    logger.error(
+                        "Verification failed for request {}: {}",
+                        request.request_id,
+                        detail.message,
+                    )
+                    return VerificationResult(
+                        success=False,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        error=detail.message,
+                        result=execution_result.result,
+                        details=details,
+                    )
+
+        if details and all(d.status == VerificationStatus.NOT_APPLICABLE for d in details):
+            overall_status = VerificationStatus.NOT_APPLICABLE
+
         logger.info(
-            "Verification completed successfully for request {}",
+            "Verification completed successfully for request {} (status={})",
             request.request_id,
+            overall_status.value,
         )
 
         return VerificationResult(
             success=True,
+            status=overall_status,
             result=execution_result.result,
+            details=details,
         )
 
-    def _verify_filesystem_postcondition(self, meta: dict) -> str | None:
-        """Verify that filesystem state reflects the executed operation."""
-        from pathlib import Path
-
-        op = meta.get("operation")
-        try:
-            if op == "create_file":
-                target = Path(meta["path"])
-                if not target.is_file():
-                    return f"Verification failed: created file '{target}' does not exist."
-
-            elif op == "create_folder":
-                target = Path(meta["path"])
-                if not target.is_dir():
-                    return f"Verification failed: created directory '{target}' does not exist."
-
-            elif op == "copy_file":
-                dst = Path(meta["destination"])
-                if not dst.exists():
-                    return f"Verification failed: copied destination '{dst}' does not exist."
-
-            elif op in {"rename_file", "move_file"}:
-                src = Path(meta["source"])
-                dst = Path(meta["destination"])
-                if not dst.exists():
-                    return f"Verification failed: destination '{dst}' does not exist."
-                if src.resolve() != dst.resolve() and src.exists():
-                    return f"Verification failed: source '{src}' still exists after move."
-
-            elif op == "delete_file":
-                target = Path(meta["path"])
-                if target.exists():
-                    return f"Verification failed: deleted target '{target}' still exists."
-
-            elif op == "open_file":
-                target = Path(meta["path"])
-                if not target.is_file():
-                    return f"Verification failed: target file '{target}' does not exist."
-                if not meta.get("verified"):
-                    return "Verification failed: open_file operation was not verified."
-
-            elif op == "open_folder":
-                target = Path(meta["path"])
-                if not target.is_dir():
-                    return f"Verification failed: target directory '{target}' does not exist."
-                if not meta.get("verified"):
-                    return "Verification failed: open_folder operation was not verified."
-
-            elif op == "open_application":
-                target = Path(meta["path"])
-                if not target.is_file():
-                    return f"Verification failed: application executable '{target}' does not exist."
-                if not meta.get("verified"):
-                    return "Verification failed: open_application operation was not verified."
-
-            elif op in ("execute_command", "run_command"):
-                if meta.get("timed_out"):
-                    return "Verification failed: command execution timed out."
-                if meta.get("status") == "failed" and meta.get("exit_code") is None:
-                    return "Verification failed: process execution failed without exit code."
-                if not meta.get("verified"):
-                    return "Verification failed: command operation was not verified."
-        except Exception as exc:
-            return f"Verification failed during filesystem check: {exc}"
-
-        return None
 
 verification_engine = VerificationEngine()
