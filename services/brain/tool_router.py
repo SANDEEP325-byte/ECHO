@@ -172,7 +172,7 @@ class ToolRouter:
             )
 
         if tool_name == "calculator":
-            if message is not None:
+            if "expression" not in kwargs and message is not None:
                 expression = self.extract_calculation(message)
 
                 if expression is None:

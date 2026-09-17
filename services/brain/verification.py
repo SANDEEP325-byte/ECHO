@@ -73,6 +73,29 @@ class VerificationEngine:
                 error=error,
             )
 
+        # Filesystem post-condition state verification
+        items_to_verify = (
+            execution_result.result
+            if isinstance(execution_result.result, list)
+            else [execution_result.result]
+        )
+
+        for item in items_to_verify:
+            if isinstance(item, dict) and "operation" in item:
+                fs_error = self._verify_filesystem_postcondition(item)
+                if fs_error is not None:
+                    request.status = RequestStatus.FAILED
+                    request.error = fs_error
+                    logger.error(
+                        "Verification failed for request {}: {}",
+                        request.request_id,
+                        fs_error,
+                    )
+                    return VerificationResult(
+                        success=False,
+                        error=fs_error,
+                    )
+
         logger.info(
             "Verification completed successfully for request {}",
             request.request_id,
@@ -82,5 +105,43 @@ class VerificationEngine:
             success=True,
             result=execution_result.result,
         )
+
+    def _verify_filesystem_postcondition(self, meta: dict) -> str | None:
+        """Verify that filesystem state reflects the executed operation."""
+        from pathlib import Path
+
+        op = meta.get("operation")
+        try:
+            if op == "create_file":
+                target = Path(meta["path"])
+                if not target.is_file():
+                    return f"Verification failed: created file '{target}' does not exist."
+
+            elif op == "create_folder":
+                target = Path(meta["path"])
+                if not target.is_dir():
+                    return f"Verification failed: created directory '{target}' does not exist."
+
+            elif op == "copy_file":
+                dst = Path(meta["destination"])
+                if not dst.exists():
+                    return f"Verification failed: copied destination '{dst}' does not exist."
+
+            elif op in {"rename_file", "move_file"}:
+                src = Path(meta["source"])
+                dst = Path(meta["destination"])
+                if not dst.exists():
+                    return f"Verification failed: destination '{dst}' does not exist."
+                if src.resolve() != dst.resolve() and src.exists():
+                    return f"Verification failed: source '{src}' still exists after move."
+
+            elif op == "delete_file":
+                target = Path(meta["path"])
+                if target.exists():
+                    return f"Verification failed: deleted target '{target}' still exists."
+        except Exception as exc:
+            return f"Verification failed during filesystem check: {exc}"
+
+        return None
 
 verification_engine = VerificationEngine()

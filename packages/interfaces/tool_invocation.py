@@ -44,6 +44,26 @@ class ToolInvocation:
             if not re.fullmatch(r"[\d\s\+\-\*\/\%\(\)\.\^\*]+", expr.strip()):
                 return False, f"Calculator expression contains unsafe or invalid characters: '{expr}'."
 
+        if name in {"read_file", "list_folder", "create_folder", "create_file", "delete_file"}:
+            if "path" not in self.arguments:
+                return False, f"Tool '{name}' invocation requires 'path'."
+            path_val = self.arguments.get("path")
+            if not isinstance(path_val, str) or not path_val.strip():
+                return False, f"Tool '{name}' requires a non-empty string 'path'."
+
+        if name in {"copy_file", "rename_file", "move_file"}:
+            if "source" not in self.arguments:
+                return False, f"Tool '{name}' invocation requires 'source'."
+            src_val = self.arguments.get("source")
+            if not isinstance(src_val, str) or not src_val.strip():
+                return False, f"Tool '{name}' requires a non-empty string 'source'."
+
+            if "destination" not in self.arguments:
+                return False, f"Tool '{name}' invocation requires 'destination'."
+            dst_val = self.arguments.get("destination")
+            if not isinstance(dst_val, str) or not dst_val.strip():
+                return False, f"Tool '{name}' requires a non-empty string 'destination'."
+
         return True, None
 
     def to_dict(self) -> dict[str, Any]:

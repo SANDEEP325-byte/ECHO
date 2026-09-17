@@ -10,6 +10,8 @@ class RiskClassifier:
         "time",
         "date",
         "read_file",
+        "list_folder",
+        "create_folder",
         "search",
         "weather",
     }
@@ -19,6 +21,7 @@ class RiskClassifier:
         "open_vscode",
         "open_chrome",
         "run_npm",
+        "copy_file",
     }
 
     SENSITIVE_OPERATIONS = {
@@ -26,6 +29,8 @@ class RiskClassifier:
         "delete_folder",
         "rename_file",
         "rename_folder",
+        "move_file",
+        "create_file",
         "git_push",
     }
 

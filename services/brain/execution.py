@@ -148,6 +148,7 @@ class ExecutionEngine:
                 result = self.router.execute_tool(
                     tool_name,
                     request.user_input,
+                    **step_args,
                 )
 
                 results.append(result)
