@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from services.api.memory import memory_router
 from services.api.schemas import ChatRequest, ChatResponse
 from services.configuration.settings import settings
 from services.logging.logger import logger
@@ -14,6 +15,8 @@ app = FastAPI(
     version=settings.app_version,
     description="A modular, privacy-first Personal AI Operating System.",
 )
+
+app.include_router(memory_router)
 
 @app.on_event("startup")
 async def startup_event() -> None:

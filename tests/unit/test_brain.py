@@ -2534,3 +2534,196 @@ async def test_brain_handles_ai_gateway_exception(monkeypatch):
     result = await brain.process("Tell me something interesting.")
 
     assert result == "I couldn't process your request because an internal component failed."
+
+def test_brain_save_memory_uses_memory_manager():
+    class FakeMemoryManager:
+        def __init__(self):
+            self.saved = []
+
+        def save_fact(self, key, value):
+            self.saved.append((key, value))
+
+    fake_memory_manager = FakeMemoryManager()
+
+    result = ECHOBrain._save_memory(
+        "my name is Sandeep",
+        memory_manager=fake_memory_manager,
+    )
+
+    assert result is not None
+    assert fake_memory_manager.saved == [
+        ("name", "Sandeep")
+    ]
+    
+def test_brain_recall_memory_uses_memory_manager():
+    class FakeMemoryManager:
+        def get_fact(self, key):
+            assert key == "name"
+            return "Sandeep"
+
+        def get_all_facts(self):
+            return {}
+
+    fake_memory_manager = FakeMemoryManager()
+
+    result = ECHOBrain._recall_memory(
+        "What is my name?",
+        memory_manager=fake_memory_manager,
+    )
+
+    assert result == "Your name is Sandeep. 😌"
+    
+def test_brain_delete_memory_uses_memory_manager():
+    class FakeMemoryManager:
+        def __init__(self):
+            self.deleted = []
+
+        def delete_fact(self, key):
+            self.deleted.append(key)
+
+        def clear_facts(self):
+            self.deleted.append("ALL")
+
+    fake_memory_manager = FakeMemoryManager()
+
+    result = ECHOBrain._delete_memory(
+        "forget my name",
+        memory_manager=fake_memory_manager,
+    )
+
+    assert result == "Okay, I've forgotten your name."
+    assert fake_memory_manager.deleted == ["name"]
+    
+def test_brain_fixed_response_uses_memory_manager():
+    class FakeMemoryManager:
+        def get_fact(self, key):
+            assert key == "preferred_name"
+            return "Boss"
+
+    fake_memory_manager = FakeMemoryManager()
+
+    result = ECHOBrain._fixed_response(
+        Intent.GREETING,
+        memory_manager=fake_memory_manager,
+    )
+
+    assert result == (
+        "Hello Boss! I'm ECHO, "
+        "your personal AI assistant. How can I help you today? 😊"
+    )
+    
+def test_brain_memory_manager_accepts_messages():
+    class FakeMemoryManager:
+        def __init__(self):
+            self.saved_messages = []
+
+        def save_message(self, role, content):
+            self.saved_messages.append((role, content))
+
+    fake_memory_manager = FakeMemoryManager()
+    brain = ECHOBrain(memory_manager=fake_memory_manager)
+
+    # Verify the manager itself accepts both message types.
+    brain.memory_manager.save_message(
+        role="user",
+        content="Hello ECHO",
+    )
+    brain.memory_manager.save_message(
+        role="assistant",
+        content="Hello! How can I help?",
+    )
+
+    assert fake_memory_manager.saved_messages == [
+        ("user", "Hello ECHO"),
+        ("assistant", "Hello! How can I help?"),
+    ]
+    
+@pytest.mark.anyio
+async def test_brain_persists_messages_using_memory_manager(monkeypatch):
+    class FakeMemoryManager:
+        def __init__(self):
+            self.messages = []
+
+        def get_recent_messages(self, limit=20):
+            return []
+
+        def get_all_facts(self):
+            return {}
+
+        def get_fact(self, key):
+            return None
+
+        def save_message(self, role, content):
+            self.messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                }
+            )
+
+    fake_memory_manager = FakeMemoryManager()
+    brain = ECHOBrain(memory_manager=fake_memory_manager)
+
+    response = await brain.process("Hello")
+
+    assert len(fake_memory_manager.messages) == 2
+
+    assert fake_memory_manager.messages[0]["role"] == "user"
+    assert fake_memory_manager.messages[0]["content"] == "Hello"
+
+    assert fake_memory_manager.messages[1]["role"] == "assistant"
+    assert fake_memory_manager.messages[1]["content"] == response
+
+
+@pytest.mark.anyio
+async def test_brain_injects_semantic_memory_into_prompt(monkeypatch):
+    import services.brain.brain as brain_module
+
+    class FakeGateway:
+        def __init__(self):
+            self.last_messages = None
+
+        async def generate(self, messages, tools=None):
+            self.last_messages = messages
+            return "Response using memory context."
+
+    class FakeMemoryManager:
+        def __init__(self):
+            self.messages = []
+
+        def get_recent_messages(self, limit=20):
+            return []
+
+        def get_all_facts(self):
+            return {}
+
+        def get_fact(self, key):
+            return None
+
+        def search_semantic_memory(self, query, limit=5, **kwargs):
+            return [
+                {
+                    "id": "mem-arch",
+                    "content": "ECHO uses a 4-layer modular memory architecture.",
+                }
+            ]
+
+        def save_message(self, role, content):
+            self.messages.append({"role": role, "content": content})
+
+    fake_gateway = FakeGateway()
+    monkeypatch.setattr(brain_module, "ai_gateway", fake_gateway)
+
+    fake_memory_manager = FakeMemoryManager()
+    brain = ECHOBrain(memory_manager=fake_memory_manager)
+
+    response = await brain.process("Tell me about ECHO's architecture.")
+
+    assert response == "Response using memory context."
+    assert fake_gateway.last_messages is not None
+    system_contents = [m.content for m in fake_gateway.last_messages if m.role == "system"]
+    assert any(
+        "Relevant context from memory:" in c
+        and "ECHO uses a 4-layer modular memory architecture." in c
+        for c in system_contents
+    )

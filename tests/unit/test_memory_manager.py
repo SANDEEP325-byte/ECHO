@@ -582,3 +582,119 @@ def test_memory_manager_builds_context_from_multiple_facts(
     assert "- favorite_color: Black" in context
     assert "- name: Sandeep" in context
     assert "- preferred_name: Boss" in context
+
+
+def test_memory_manager_delegates_semantic_operations():
+    class FakeSemantic:
+        def __init__(self):
+            self.added = None
+            self.searched = None
+            self.got = None
+            self.deleted = None
+            self.counted = None
+            self.cleared = None
+
+        def add(self, content, metadata=None, collection_name="user_memory", memory_id=None):
+            self.added = (content, metadata, collection_name, memory_id)
+            return memory_id or "mem-1"
+
+        def search(self, query, limit=5, collection_name="user_memory", where=None):
+            self.searched = (query, limit, collection_name, where)
+            return [{"id": "mem-1", "document": query, "metadata": {}, "distance": 0.1}]
+
+        def get(self, memory_id, collection_name="user_memory"):
+            self.got = (memory_id, collection_name)
+            return {"id": memory_id, "document": "test doc", "metadata": {}}
+
+        def delete(self, memory_id, collection_name="user_memory"):
+            self.deleted = (memory_id, collection_name)
+            return True
+
+        def count(self, collection_name="user_memory"):
+            self.counted = collection_name
+            return 42
+
+        def clear(self, collection_name=None):
+            self.cleared = collection_name
+
+    fake_sem = FakeSemantic()
+    manager = MemoryManager(semantic=fake_sem)
+
+    # Test add
+    mid = manager.add_semantic_memory("User likes dark mode", {"tag": "ui"}, "user_memory", "custom-id")
+    assert mid == "custom-id"
+    assert fake_sem.added == ("User likes dark mode", {"tag": "ui"}, "user_memory", "custom-id")
+
+    # Test search
+    res = manager.search_semantic_memory("dark mode", limit=3, collection_name="user_memory")
+    assert len(res) == 1
+    assert fake_sem.searched == ("dark mode", 3, "user_memory", None)
+
+    # Test get
+    doc = manager.get_semantic_memory("custom-id", "user_memory")
+    assert doc["id"] == "custom-id"
+    assert fake_sem.got == ("custom-id", "user_memory")
+
+    # Test delete
+    assert manager.delete_semantic_memory("custom-id", "user_memory") is True
+    assert fake_sem.deleted == ("custom-id", "user_memory")
+
+    # Test count
+    assert manager.count_semantic_memory("user_memory") == 42
+    assert fake_sem.counted == "user_memory"
+
+    # Test clear_semantic_memory
+    manager.clear_semantic_memory("user_memory")
+    assert fake_sem.cleared == "user_memory"
+
+
+def test_memory_manager_clear_all_with_semantic():
+    class FakeConversation:
+        def __init__(self):
+            self.cleared = False
+        def clear(self):
+            self.cleared = True
+
+    class FakePersistent:
+        def __init__(self):
+            self.cleared = False
+        def clear(self):
+            self.cleared = True
+
+    class FakeFacts:
+        def __init__(self):
+            self.cleared = False
+        def clear(self):
+            self.cleared = True
+
+    class FakeSemantic:
+        def __init__(self):
+            self.cleared = False
+        def clear(self, collection_name=None):
+            self.cleared = True
+
+    c = FakeConversation()
+    p = FakePersistent()
+    f = FakeFacts()
+    s = FakeSemantic()
+
+    manager = MemoryManager(conversation=c, persistent=p, facts=f, semantic=s)
+    manager.clear_all()
+
+    assert c.cleared is True
+    assert p.cleared is True
+    assert f.cleared is True
+    assert s.cleared is True
+
+
+def test_memory_manager_semantic_safe_when_no_semantic():
+    class DummyNoSemantic:
+        pass
+
+    manager = MemoryManager(semantic=DummyNoSemantic())
+    # Should not crash, returns safe fallback defaults
+    assert manager.add_semantic_memory("test") == ""
+    assert manager.search_semantic_memory("test") == []
+    assert manager.get_semantic_memory("test") is None
+    assert manager.delete_semantic_memory("test") is False
+    assert manager.count_semantic_memory() == 0

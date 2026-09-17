@@ -7,6 +7,7 @@ from services.logging.logger import logger
 from services.memory.conversation import Message
 from services.memory.facts import fact_memory
 from services.memory.persistent import persistent_memory
+from services.memory.manager import memory_manager
 from packages.interfaces.request import Request, RequestStatus
 from services.brain.context_builder import context_builder
 from services.brain.request_analyzer import request_analyzer
@@ -17,12 +18,22 @@ from services.brain.tool_selector import tool_selector
 
 class ECHOBrain:
     """Central coordinator for ECHO's reasoning and tool execution."""
+    
+    def __init__(
+        self,
+        memory_manager=None,
+    ) -> None:
+        self.memory_manager = memory_manager
+        
     @staticmethod
     def _clean_memory_value(value: str) -> str:
         return value.strip().rstrip(".,!?;:")
 
     @staticmethod
-    def _save_memory(user_message: str) -> str | None:
+    def _save_memory(
+        user_message: str,
+        memory_manager=None,
+    ) -> str | None:
         normalized = user_message.strip()
 
         name_patterns = [
@@ -41,10 +52,15 @@ class ECHOBrain:
                 name = ECHOBrain._clean_memory_value(match.group(1))
 
                 if name:
-                    fact_memory.save_fact("name", name)
+                    if memory_manager is not None:
+                        memory_manager.save_fact("name", name)
+                    else:
+                        fact_memory.save_fact("name", name)
+
                     return (
                         f"Got it! Your name is {name}. "
-                        "I'll remember that.😉")
+                        "I'll remember that.😉"
+                    )
 
         preferred_name_patterns = [
             r"call me (.+)",
@@ -67,10 +83,16 @@ class ECHOBrain:
                 )
 
                 if preferred_name:
-                    fact_memory.save_fact(
-                        "preferred_name",
-                        preferred_name,
-                    )
+                    if memory_manager is not None:
+                        memory_manager.save_fact(
+                            "preferred_name",
+                            preferred_name,
+                        )
+                    else:
+                        fact_memory.save_fact(
+                            "preferred_name",
+                            preferred_name,
+                        )
 
                     return (
                         f"Got it! I'll call you {preferred_name}. "
@@ -99,7 +121,11 @@ class ECHOBrain:
                 )
 
                 if color:
-                    fact_memory.save_fact("favorite_color", color)
+                    if memory_manager is not None:
+                        memory_manager.save_fact("favorite_color", color)
+                    else:
+                        fact_memory.save_fact("favorite_color", color)
+
                     return (
                         f"Got it! Your favorite color is {color}. "
                         "I'll remember that. 🫡"
@@ -107,7 +133,10 @@ class ECHOBrain:
         return None
 
     @staticmethod
-    def _recall_memory(user_message: str) -> str:
+    def _recall_memory(
+        user_message: str,
+        memory_manager=None,
+    ) -> str:
         normalized = user_message.lower().strip()
 
         if (
@@ -116,7 +145,10 @@ class ECHOBrain:
             or "whats my name" in normalized
             or "do you know my name" in normalized
         ):
-            value = fact_memory.get_fact("name")
+            if memory_manager is not None:
+                value = memory_manager.get_fact("name")
+            else:
+                value = fact_memory.get_fact("name")
 
             if value is not None:
                 return f"Your name is {value}. 😌"
@@ -130,7 +162,10 @@ class ECHOBrain:
             or "what's my preferred name" in normalized
             or "what name should you use" in normalized
         ):
-            value = fact_memory.get_fact("preferred_name")
+            if memory_manager is not None:
+                value = memory_manager.get_fact("preferred_name")
+            else:
+                value = fact_memory.get_fact("preferred_name")
 
             if value is not None:
                 return f"I'll call you {value}. 😉"
@@ -141,14 +176,20 @@ class ECHOBrain:
             "favorite color" in normalized
             or "favourite color" in normalized
         ):
-            value = fact_memory.get_fact("favorite_color")
+            if memory_manager is not None:
+                value = memory_manager.get_fact("favorite_color")
+            else:
+                value = fact_memory.get_fact("favorite_color")
 
             if value is not None:
                 return f"Your favorite color is {value}. 🫟"
 
             return "I don't know your favorite color yet."
 
-        facts = fact_memory.get_all_facts()
+        if memory_manager is not None:
+            facts = memory_manager.get_all_facts()
+        else:
+            facts = fact_memory.get_all_facts()
 
         if not facts:
             return "I don't have any saved information about you yet."
@@ -183,7 +224,10 @@ class ECHOBrain:
         return f"I remember that {summary}. 🫡"
 
     @staticmethod
-    def _delete_memory(user_message: str) -> str:
+    def _delete_memory(
+        user_message: str,
+        memory_manager=None,
+    ) -> str:
         normalized = user_message.lower().strip()
 
         if (
@@ -191,32 +235,54 @@ class ECHOBrain:
             or "forget all my memories" in normalized
             or "forget all my information" in normalized
         ):
-            fact_memory.clear()
+            if memory_manager is not None:
+                memory_manager.clear_facts()
+            else:
+                fact_memory.clear()
+
             return "Okay, I've forgotten everything I remember about you."
 
         if "name" in normalized:
-            fact_memory.delete_fact("name")
+            if memory_manager is not None:
+                memory_manager.delete_fact("name")
+            else:
+                fact_memory.delete_fact("name")
+
             return "Okay, I've forgotten your name."
 
         if (
             "favorite color" in normalized
             or "favourite color" in normalized
         ):
-            fact_memory.delete_fact("favorite_color")
+            if memory_manager is not None:
+                memory_manager.delete_fact("favorite_color")
+            else:
+                fact_memory.delete_fact("favorite_color")
+
             return "Okay, I've forgotten your favorite color."
 
         if (
             "call me" in normalized
             or "preferred name" in normalized
         ):
-            fact_memory.delete_fact("preferred_name")
+            if memory_manager is not None:
+                memory_manager.delete_fact("preferred_name")
+            else:
+                fact_memory.delete_fact("preferred_name")
+
             return "Okay, I've forgotten what you'd like me to call you."
 
         return "I don't know which memory you want me to forget."
-
+    
     @staticmethod
-    def _fixed_response(intent: Intent) -> str | None:
-        preferred_name = fact_memory.get_fact("preferred_name")
+    def _fixed_response(
+        intent: Intent,
+        memory_manager=None,
+    ) -> str | None:
+        if memory_manager is not None:
+            preferred_name = memory_manager.get_fact("preferred_name")
+        else:
+            preferred_name = fact_memory.get_fact("preferred_name")
 
         if intent == Intent.GREETING:
             if preferred_name:
@@ -281,11 +347,17 @@ class ECHOBrain:
 
             return "I couldn't process your request because an internal component failed."
         try:
-            request = context_builder.build(
-                request,
-                memory=persistent_memory,
-                facts=fact_memory,
-            )
+            if self.memory_manager is not None:
+                request = context_builder.build(
+                    request,
+                    memory_manager=self.memory_manager,
+                )
+            else:
+                request = context_builder.build(
+                    request,
+                    memory=persistent_memory,
+                    facts=fact_memory,
+                )
         except Exception as exc:
             request.status = RequestStatus.FAILED
             request.error = str(exc)
@@ -430,7 +502,7 @@ class ECHOBrain:
             )
         )
 
-        facts = request.context["facts"]
+        facts = request.context.get("facts", {})
 
         if facts:
             memory_lines = ["Known facts about the user:"]
@@ -446,6 +518,25 @@ class ECHOBrain:
                 ),
             )
 
+        semantic_memories = request.context.get("semantic_memories", [])
+
+        if semantic_memories:
+            semantic_lines = ["Relevant context from memory:"]
+
+            for item in semantic_memories:
+                content = item.get("content") or item.get("document") or item.get("text", "")
+                if content:
+                    semantic_lines.append(f"- {content}")
+
+            if len(semantic_lines) > 1:
+                messages.insert(
+                    0,
+                    Message(
+                        role="system",
+                        content="\n".join(semantic_lines),
+                    ),
+                )
+
         intent = Intent(request.intent)
 
         logger.info("Detected intent: {}", intent.value)
@@ -459,19 +550,30 @@ class ECHOBrain:
             )
 
         # Handle deterministic intents without using the LLM.
-        fixed_response = self._fixed_response(intent)
-
+        fixed_response = self._fixed_response(
+            intent,
+            memory_manager=self.memory_manager,
+        )
         if fixed_response is not None:
             response = fixed_response
 
         elif intent == Intent.MEMORY_SAVE:
-            response = self._save_memory(user_message)
+            response = self._save_memory(
+                user_message,
+                memory_manager=self.memory_manager,
+            )
 
         elif intent == Intent.MEMORY_RECALL:
-            response = self._recall_memory(user_message)
+            response = self._recall_memory(
+                user_message,
+                memory_manager=self.memory_manager,
+            )
 
         elif intent == Intent.MEMORY_DELETE:
-           response = self._delete_memory(user_message)
+            response = self._delete_memory(
+                user_message,
+                memory_manager=self.memory_manager,
+            )
 
         elif response is not None:
             pass
@@ -507,17 +609,30 @@ class ECHOBrain:
                     )
                     return "I couldn't process your request because an internal component failed."
 
-        persistent_memory.save_message(
-            role="user",
-            content=user_message,
-        )
+        if self.memory_manager is not None:
+            self.memory_manager.save_message(
+                role="user",
+                content=user_message,
+            )
 
-        persistent_memory.save_message(
-            role="assistant",
-            content=response,
-        )
+            self.memory_manager.save_message(
+                role="assistant",
+                content=response,
+            )
+        else:
+            persistent_memory.save_message(
+                role="user",
+                content=user_message,
+            )
+
+            persistent_memory.save_message(
+                role="assistant",
+                content=response,
+            )
 
         logger.info("Brain completed request")
         return response
 
-echo_brain = ECHOBrain()
+echo_brain = ECHOBrain(
+    memory_manager=memory_manager,
+)
