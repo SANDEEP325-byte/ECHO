@@ -1,3 +1,5 @@
+from typing import Any
+
 from packages.interfaces.security import RiskLevel
 
 class RiskClassifier:
@@ -33,12 +35,51 @@ class RiskClassifier:
         "massive_delete",
     }
 
+    DANGEROUS_PATTERNS = (
+        "format",
+        "rm -rf",
+        "rmdir /s",
+        "del /s",
+        "drop table",
+        "drop database",
+        "truncate",
+        "remove_repository",
+        "massive_delete",
+        ":(){ :|:& };:",
+    )
+
+    SENSITIVE_PATTERNS = (
+        "delete",
+        "unlink",
+        "remove",
+        "destroy",
+        "kill",
+        "pkill",
+        "overwrite",
+        "chmod",
+        "chown",
+        "passwd",
+    )
+
     @classmethod
-    def classify(cls, operation: str) -> RiskLevel:
-        """Return the risk level associated with an operation."""
+    def classify(
+        cls,
+        operation: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> RiskLevel:
+        """Return the risk level associated with an operation and optional arguments."""
 
         normalized = operation.strip().lower()
 
+        # 1. Payload inspection for dangerous terms
+        if arguments:
+            payload_str = " ".join(str(v).lower() for v in arguments.values())
+            if any(pattern in payload_str for pattern in cls.DANGEROUS_PATTERNS):
+                return RiskLevel.CRITICAL
+            if any(pattern in payload_str for pattern in cls.SENSITIVE_PATTERNS):
+                return RiskLevel.SENSITIVE
+
+        # 2. Base operation classification
         if normalized in cls.SAFE_OPERATIONS:
             return RiskLevel.SAFE
 
@@ -53,5 +94,6 @@ class RiskClassifier:
 
         # Unknown operations must never be treated as safe.
         return RiskLevel.SENSITIVE
+
 
 risk_classifier = RiskClassifier()

@@ -89,8 +89,18 @@ class ExecutionEngine:
                     ),
                 )
 
+            step_args = getattr(step, "arguments", {}) or {}
             try:
-                safety_result = self.safety_engine.evaluate(tool_name)
+                try:
+                    safety_result = self.safety_engine.evaluate(
+                        tool_name,
+                        arguments=step_args,
+                    )
+                except TypeError as type_err:
+                    if "unexpected keyword argument" in str(type_err):
+                        safety_result = self.safety_engine.evaluate(tool_name)
+                    else:
+                        raise
             except Exception as exc:
                 logger.error(
                     "Request {} step {} safety evaluation failed: {}",
@@ -122,6 +132,12 @@ class ExecutionEngine:
 
                 return ExecutionResult(
                     success=False,
+                    requires_confirmation=True,
+                    pending_action={
+                        "tool": tool_name,
+                        "step_number": step.step_number,
+                        "arguments": step_args,
+                    },
                     error=(
                         f"User confirmation is required before executing "
                         f"'{tool_name}'."

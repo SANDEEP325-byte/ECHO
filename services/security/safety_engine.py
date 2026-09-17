@@ -1,3 +1,5 @@
+from typing import Any
+
 from packages.interfaces.security import (
     PermissionDecision,
     RiskLevel,
@@ -13,17 +15,19 @@ class SafetyEngine:
     def evaluate(
         self,
         operation: str,
+        arguments: dict[str, Any] | None = None,
     ) -> SafetyResult:
         """Evaluate an operation and return its safety decision."""
         
         normalized = operation.strip().lower()
         
         logger.info(
-            "Evaluating safety for operation: {}",
+            "Evaluating safety for operation: {} (has_args={})",
             normalized,
+            arguments is not None,
         )
         
-        risk_level = risk_classifier.classify(normalized)
+        risk_level = risk_classifier.classify(normalized, arguments=arguments)
         
         decision = permission_manager.decide(risk_level)
         
@@ -41,6 +45,7 @@ class SafetyEngine:
             risk_level=risk_level,
             reason=reason,
             operation=normalized,
+            metadata=arguments,
         )
         
         logger.info(

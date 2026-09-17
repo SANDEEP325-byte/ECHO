@@ -1,11 +1,16 @@
 from dataclasses import dataclass, field
 
 
+from typing import Any
+
+
 @dataclass(frozen=True)
 class PlanStep:
     step_number: int
     description: str
     tool_name: str | None = None
+    arguments: dict[str, Any] = field(default_factory=dict)
+    purpose: str | None = None
 
 
 @dataclass(frozen=True)
