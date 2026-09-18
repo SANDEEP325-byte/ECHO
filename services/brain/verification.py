@@ -1,6 +1,6 @@
 import os
-from pathlib import Path
 import tempfile
+from pathlib import Path
 from typing import Any
 
 from packages.interfaces.execution import ExecutionResult
@@ -12,18 +12,23 @@ from packages.interfaces.verification import (
 )
 from services.desktop.policy import (
     DesktopSecurityPolicy,
-    desktop_security_policy,
     OperationType,
     SecurityPolicyError,
+    desktop_security_policy,
 )
-from services.logging.logger import logger
+from services.logging.logger import logger  # type: ignore[attr-defined]
 
 
 class VerificationEngine:
     """Verifies whether an ECHO execution post-condition can be verified."""
 
-    def __init__(self, desktop_policy: DesktopSecurityPolicy | None = None) -> None:
+    def __init__(
+        self,
+        desktop_policy: DesktopSecurityPolicy | None = None,
+        browser_policy: Any | None = None,
+    ) -> None:
         self.policy = desktop_policy
+        self.browser_policy = browser_policy
 
     def _validate_safe_path(
         self,
@@ -47,7 +52,7 @@ class VerificationEngine:
             resolved = active_policy.normalize_path(raw_path)
         except SecurityPolicyError as spe:
             return False, spe.reason, None
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return False, f"Invalid path syntax: {exc}", None
 
         # 1. Protected System Location check
@@ -56,7 +61,11 @@ class VerificationEngine:
 
         # 2. Sensitive File / Credentials check
         if active_policy._is_sensitive_file(resolved):
-            return False, "Access to credentials, secrets, or environment configuration is prohibited.", None
+            return (
+                False,
+                "Access to credentials, secrets, or environment configuration is prohibited.",
+                None,
+            )
 
         # 3. Sandbox Containment Check
         for root in active_policy.authorized_roots:
@@ -481,6 +490,50 @@ class VerificationEngine:
                     observed="Command executed successfully (exit code 0, bounded output)",
                 )
 
+            elif op == "browser_open":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser session launch failed.",
+                        expected="Successful browser session launch",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+                session_id = meta.get("session_id")
+                if not session_id:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser session launch missing session identifier.",
+                        expected="Valid browser session ID",
+                        observed="Missing session ID",
+                    )
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser session '{session_id}' launch verified.",
+                    expected="Browser session launched",
+                    observed=f"Session active (id={session_id})",
+                )
+
+            elif op == "browser_close":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser session closure failed.",
+                        expected="Successful browser session closure",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+                session_id = meta.get("session_id", "active")
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser session '{session_id}' closure verified.",
+                    expected="Browser session closed",
+                    observed="Session closed cleanly",
+                )
+
             elif op == "browser_navigate":
                 if not meta.get("success"):
                     return VerificationDetail(
@@ -503,7 +556,8 @@ class VerificationEngine:
 
                 from services.browser.policy import browser_security_policy
 
-                policy_check = browser_security_policy.validate_url(url)
+                active_browser_policy = self.browser_policy or browser_security_policy
+                policy_check = active_browser_policy.validate_url(url)
                 if not policy_check.allowed:
                     return VerificationDetail(
                         operation=op,
@@ -565,7 +619,8 @@ class VerificationEngine:
                     if nav_url and nav_url != "about:blank":
                         from services.browser.policy import browser_security_policy
 
-                        policy_check = browser_security_policy.validate_url(nav_url)
+                        active_browser_policy = self.browser_policy or browser_security_policy
+                        policy_check = active_browser_policy.validate_url(nav_url)
                         if not policy_check.allowed:
                             return VerificationDetail(
                                 operation=op,
@@ -615,7 +670,8 @@ class VerificationEngine:
                     if nav_url and nav_url != "about:blank":
                         from services.browser.policy import browser_security_policy
 
-                        policy_check = browser_security_policy.validate_url(nav_url)
+                        active_browser_policy = self.browser_policy or browser_security_policy
+                        policy_check = active_browser_policy.validate_url(nav_url)
                         if not policy_check.allowed:
                             return VerificationDetail(
                                 operation=op,
@@ -634,6 +690,165 @@ class VerificationEngine:
                     observed=f"Entered {text_len} characters (submitted={meta.get('submitted', False)})",
                 )
 
+            elif op == "browser_download":
+                if not meta.get("success"):
+                    err_msg = str(meta.get("error", "Execution unsuccessful"))
+                    status = (
+                        VerificationStatus.VERIFICATION_ERROR
+                        if "security policy" in err_msg.lower() or "prohibited" in err_msg.lower()
+                        else VerificationStatus.NOT_VERIFIED
+                    )
+                    return VerificationDetail(
+                        operation=op,
+                        status=status,
+                        message=f"Browser download failed: {err_msg}",
+                        expected="Successful file download",
+                        observed=f"Failure: {err_msg}",
+                    )
+
+                dest_path_str = meta.get("destination_path")
+                if not dest_path_str or not isinstance(dest_path_str, str):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser download metadata missing destination path.",
+                        expected="Valid destination path",
+                        observed="Missing destination path",
+                    )
+
+                # Validate destination through DesktopSecurityPolicy
+                safe_dest, reason_dest, resolved_dest = self._validate_safe_path(
+                    dest_path_str, OperationType.READ
+                )
+                if not safe_dest or resolved_dest is None:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Downloaded file destination violates desktop security policy: {reason_dest}",
+                        expected="Authorized sandbox destination path",
+                        observed=f"Policy violation: {reason_dest}",
+                    )
+
+                # Check prohibited executable/script extensions
+                from services.browser.operations import BrowserOperations
+
+                dest_path = resolved_dest
+                if dest_path.suffix.lower() in BrowserOperations.BLOCKED_DOWNLOAD_EXTENSIONS:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Downloaded file has prohibited executable extension '{dest_path.suffix.lower()}'.",
+                        expected="Non-executable downloaded file",
+                        observed=f"Prohibited extension: {dest_path.suffix.lower()}",
+                    )
+
+                # Verify file exists on disk and is a regular file
+                if not dest_path.exists() or not dest_path.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Downloaded file '{dest_path.name}' not found on disk at '{dest_path}'.",
+                        expected="Downloaded file exists on disk",
+                        observed="File not found on disk",
+                    )
+
+                # Verify file size
+                actual_size = dest_path.stat().st_size
+                if actual_size <= 0:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Downloaded file '{dest_path.name}' is empty (0 bytes).",
+                        expected="Non-empty downloaded file",
+                        observed="Empty file (0 bytes)",
+                    )
+
+                if actual_size > BrowserOperations.MAX_DOWNLOAD_SIZE_BYTES:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Downloaded file size ({actual_size} bytes) exceeds maximum limit ({BrowserOperations.MAX_DOWNLOAD_SIZE_BYTES} bytes).",
+                        expected=f"File size <= {BrowserOperations.MAX_DOWNLOAD_SIZE_BYTES} bytes",
+                        observed=f"Oversized file ({actual_size} bytes)",
+                    )
+
+                # If URL present, validate against browser security policy
+                download_url = meta.get("url")
+                if download_url and download_url != "about:blank":
+                    from services.browser.policy import browser_security_policy
+
+                    active_browser_policy = self.browser_policy or browser_security_policy
+                    url_check = active_browser_policy.validate_url(download_url)
+                    if not url_check.allowed:
+                        return VerificationDetail(
+                            operation=op,
+                            status=VerificationStatus.VERIFICATION_ERROR,
+                            message=f"Download URL violates browser security policy: {url_check.reason}",
+                            expected="Compliant download URL",
+                            observed=f"Policy violation: {url_check.reason}",
+                        )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser download of '{dest_path.name}' verified ({actual_size} bytes saved).",
+                    expected=f"File '{dest_path.name}' downloaded successfully",
+                    observed=f"File saved to '{dest_path}' ({actual_size} bytes)",
+                )
+
+            elif op == "browser_upload":
+                if not meta.get("success"):
+                    err_msg = str(meta.get("error", "Execution unsuccessful"))
+                    status = (
+                        VerificationStatus.VERIFICATION_ERROR
+                        if "security policy" in err_msg.lower() or "prohibited" in err_msg.lower()
+                        else VerificationStatus.NOT_VERIFIED
+                    )
+                    return VerificationDetail(
+                        operation=op,
+                        status=status,
+                        message=f"Browser upload failed: {err_msg}",
+                        expected="Successful file upload",
+                        observed=f"Failure: {err_msg}",
+                    )
+
+                selector = meta.get("selector", "")
+                if not selector:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser upload metadata missing selector.",
+                        expected="Target input selector",
+                        observed="Missing selector",
+                    )
+
+                # Check post-upload navigation if occurred
+                if meta.get("navigation_occurred"):
+                    nav_url = meta.get("url")
+                    if nav_url and nav_url != "about:blank":
+                        from services.browser.policy import browser_security_policy
+
+                        active_browser_policy = self.browser_policy or browser_security_policy
+                        url_check = active_browser_policy.validate_url(nav_url)
+                        if not url_check.allowed:
+                            return VerificationDetail(
+                                operation=op,
+                                status=VerificationStatus.VERIFICATION_ERROR,
+                                message=f"Post-upload destination violates browser security policy: {url_check.reason}",
+                                expected="Compliant destination URL",
+                                observed=f"Policy violation: {url_check.reason}",
+                            )
+
+                file_name = meta.get("file_name", "file")
+                file_size = meta.get("file_size", 0)
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser upload of '{file_name}' into '{selector}' verified ({file_size} bytes).",
+                    expected=f"Upload '{file_name}' into '{selector}'",
+                    observed=f"Upload completed ({file_size} bytes, navigation_occurred={meta.get('navigation_occurred', False)})",
+                )
+
             else:
                 return VerificationDetail(
                     operation=str(op),
@@ -643,7 +858,7 @@ class VerificationEngine:
                     observed="N/A",
                 )
 
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             return VerificationDetail(
                 operation=str(op),
                 status=VerificationStatus.VERIFICATION_ERROR,
@@ -680,10 +895,7 @@ class VerificationEngine:
 
         if not execution_result.success:
             request.status = RequestStatus.FAILED
-            error = (
-                execution_result.error
-                or "Verification failed: execution was unsuccessful."
-            )
+            error = execution_result.error or "Verification failed: execution was unsuccessful."
             request.error = error
             logger.error(
                 "Verification failed for request {}: {}",

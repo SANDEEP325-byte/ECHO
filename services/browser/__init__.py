@@ -4,6 +4,8 @@ Phase 5A: Browser Security Policy & URL Sandbox.
 Phase 5B: BrowserService & BrowserSession Lifecycle Management.
 Phase 5C: Safe Browser Inspection & Navigation.
 Phase 5D: Controlled Browser Interaction.
+Phase 5E: Secure Browser File Transfer.
+Phase 5F: Browser Verification + Regression.
 """
 
 from services.browser.errors import (

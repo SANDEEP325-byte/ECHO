@@ -1,10 +1,12 @@
-"""ECHO Browser Tools (Phase 5C + 5D).
+"""ECHO Browser Tools (Phase 5C, 5D, 5E, 5F).
 
 Provides concrete ECHO Tool implementations for safe browser automation:
 - BrowserNavigateTool (browser_navigate)
 - BrowserReadPageTool (browser_read_page)
 - BrowserClickTool (browser_click)
 - BrowserTypeTool (browser_type)
+- BrowserDownloadTool (browser_download)
+- BrowserUploadTool (browser_upload)
 
 Integrates into the canonical ToolRegistry and ToolRouter pipeline.
 """
@@ -208,9 +210,121 @@ browser_read_page_tool = BrowserReadPageTool()
 browser_click_tool = BrowserClickTool()
 browser_type_tool = BrowserTypeTool()
 
+
+class BrowserDownloadTool(Tool):
+    """Tool to securely download a file via URL or element click into an authorized sandbox location."""
+
+    name = "browser_download"
+    description = (
+        "Downloads a file via URL navigation or element click into an authorized sandbox location."
+    )
+
+    definition = ToolDefinition(
+        name="browser_download",
+        description="Downloads a file via URL navigation or element click into an authorized sandbox location.",
+        parameters=(
+            ToolParameter(
+                name="destination_path",
+                type="string",
+                description="The target file or directory path in an authorized sandbox location.",
+                required=True,
+            ),
+            ToolParameter(
+                name="url",
+                type="string",
+                description="Optional direct HTTP/HTTPS URL to download.",
+                required=False,
+            ),
+            ToolParameter(
+                name="selector",
+                type="string",
+                description="Optional element selector to click to trigger the download.",
+                required=False,
+            ),
+            ToolParameter(
+                name="session_id",
+                type="string",
+                description="Optional browser session ID.",
+                required=False,
+            ),
+        ),
+    )
+
+    def execute(  # type: ignore[override]
+        self,
+        destination_path: str,
+        url: str | None = None,
+        selector: str | None = None,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute secure download synchronously via the browser async runner."""
+        return browser_runner.run(
+            browser_operations.download(
+                destination_path=destination_path,
+                url=url,
+                selector=selector,
+                session_id=session_id,
+            )
+        )
+
+
+class BrowserUploadTool(Tool):
+    """Tool to upload a local file from an authorized sandbox location into an element."""
+
+    name = "browser_upload"
+    description = "Uploads a local file from an authorized sandbox location into an input element."
+
+    definition = ToolDefinition(
+        name="browser_upload",
+        description="Uploads a local file from an authorized sandbox location into an input element.",
+        parameters=(
+            ToolParameter(
+                name="selector",
+                type="string",
+                description="The element selector targeting the file input.",
+                required=True,
+            ),
+            ToolParameter(
+                name="file_path",
+                type="string",
+                description="The local file path in an authorized sandbox location to upload.",
+                required=True,
+            ),
+            ToolParameter(
+                name="session_id",
+                type="string",
+                description="Optional browser session ID.",
+                required=False,
+            ),
+        ),
+    )
+
+    def execute(  # type: ignore[override]
+        self,
+        selector: str,
+        file_path: str,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Execute secure file upload synchronously via the browser async runner."""
+        return browser_runner.run(
+            browser_operations.upload(
+                selector=selector,
+                file_path=file_path,
+                session_id=session_id,
+            )
+        )
+
+
+browser_download_tool = BrowserDownloadTool()
+browser_upload_tool = BrowserUploadTool()
+
 ALL_BROWSER_TOOLS: list[Tool] = [
     browser_navigate_tool,
     browser_read_page_tool,
     browser_click_tool,
     browser_type_tool,
+    browser_download_tool,
+    browser_upload_tool,
 ]

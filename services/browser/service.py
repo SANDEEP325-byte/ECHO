@@ -274,6 +274,7 @@ class BrowserService:
                     ignore_https_errors=False,  # CRITICAL: Always verify TLS certificates
                     java_script_enabled=True,
                     viewport={"width": 1280, "height": 720},
+                    accept_downloads=True,
                 )
                 if hasattr(context, "set_default_timeout"):
                     context.set_default_timeout(self.default_timeout_ms)

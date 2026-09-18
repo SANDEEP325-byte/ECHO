@@ -41,6 +41,8 @@ class RiskClassifier:
         "git_push",
         "execute_command",
         "run_command",
+        "browser_download",
+        "browser_upload",
     }
 
     CRITICAL_OPERATIONS = {
@@ -115,6 +117,24 @@ class RiskClassifier:
                 )
                 if any(k in selector for k in sensitive_field_keywords):
                     return RiskLevel.SENSITIVE
+
+            if normalized == "browser_download":
+                dest = str(arguments.get("destination_path", "")).lower()
+                dangerous_exts = (
+                    ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".msi", ".dll", ".sys", ".scr"
+                )
+                if any(dest.endswith(ext) for ext in dangerous_exts) or dest.startswith(r"\\"):
+                    return RiskLevel.CRITICAL
+                return RiskLevel.SENSITIVE
+
+            if normalized == "browser_upload":
+                src = str(arguments.get("file_path", "")).lower()
+                sensitive_targets = (
+                    "id_rsa", "id_ed25519", ".pem", ".key", "credentials", ".secrets", ".ssh", ".aws"
+                )
+                if any(t in src for t in sensitive_targets) or src.startswith(r"\\"):
+                    return RiskLevel.CRITICAL
+                return RiskLevel.SENSITIVE
 
         # 2. Base operation classification
         if normalized in cls.SAFE_OPERATIONS:
