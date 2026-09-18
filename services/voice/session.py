@@ -27,17 +27,28 @@ class VoiceSessionController:
         },
         VoiceSessionState.LISTENING: {
             VoiceSessionState.PROCESSING,
+            VoiceSessionState.WAITING_CONFIRMATION,
+            VoiceSessionState.COMPLETED,
             VoiceSessionState.IDLE,
             VoiceSessionState.ERROR,
             VoiceSessionState.CLOSED,
         },
         VoiceSessionState.PROCESSING: {
+            VoiceSessionState.WAITING_CONFIRMATION,
             VoiceSessionState.SPEAKING,
             VoiceSessionState.COMPLETED,
             VoiceSessionState.ERROR,
             VoiceSessionState.CLOSED,
         },
+        VoiceSessionState.WAITING_CONFIRMATION: {
+            VoiceSessionState.SPEAKING,
+            VoiceSessionState.LISTENING,
+            VoiceSessionState.COMPLETED,
+            VoiceSessionState.ERROR,
+            VoiceSessionState.CLOSED,
+        },
         VoiceSessionState.SPEAKING: {
+            VoiceSessionState.WAITING_CONFIRMATION,
             VoiceSessionState.COMPLETED,
             VoiceSessionState.IDLE,
             VoiceSessionState.ERROR,
@@ -145,6 +156,29 @@ class VoiceSessionController:
             self.last_activity_at = time.time()
             logger.warning("Voice session %s failed: %s", self.session_id, error)
 
+    def request_confirmation(self, action_id: str) -> None:
+        """Transition session to WAITING_CONFIRMATION state and record pending action."""
+        with self._lock:
+            self.session.pending_action_id = action_id
+            self.transition_to(VoiceSessionState.WAITING_CONFIRMATION)
+
+    def resolve_confirmation(self) -> None:
+        """Clear pending action binding."""
+        with self._lock:
+            self.session.pending_action_id = None
+
+    @property
+    def pending_action_id(self) -> str | None:
+        """Get ID of currently pending action requiring confirmation, if any."""
+        with self._lock:
+            return self.session.pending_action_id
+
+    @property
+    def is_waiting_confirmation(self) -> bool:
+        """Check if session is currently awaiting human confirmation."""
+        with self._lock:
+            return self.session.state == VoiceSessionState.WAITING_CONFIRMATION
+
     def reset(self) -> None:
         """Reset session to IDLE state."""
         with self._lock:
@@ -153,6 +187,7 @@ class VoiceSessionController:
             self.last_activity_at = time.time()
             self.session.error = None
             self.session.transcription = ""
+            self.session.pending_action_id = None
 
     def is_expired(self) -> bool:
         """Check if session exceeded maximum allowed recording duration."""

@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
-from enum import Enum
 import time
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
-from uuid import uuid4
 
 from packages.interfaces.security import RiskLevel
 from packages.interfaces.verification import VerificationResult
@@ -47,6 +46,7 @@ class PendingAction:
     step_number: int | None = None
     execution_result: Any = None
     error: str | None = None
+    session_id: str | None = None
 
     def __post_init__(self) -> None:
         # Enforce shallow copy of arguments to prevent external mutation
@@ -69,11 +69,14 @@ class PendingAction:
             "tool": self.tool_name,
             "step_number": self.step_number,
             "arguments": dict(self.arguments),
-            "risk_level": self.risk_level.value if hasattr(self.risk_level, "value") else str(self.risk_level),
+            "risk_level": self.risk_level.value
+            if hasattr(self.risk_level, "value")
+            else str(self.risk_level),
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "state": self.state.value,
             "request_id": self.request_id,
+            "session_id": self.session_id,
         }
 
 

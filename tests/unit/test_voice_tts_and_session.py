@@ -58,8 +58,8 @@ def test_speech_synthesizer_text_cleaning_and_bounds():
     dirty_text = "   Hello \n\t  ECHO   "
     assert BaseSpeechSynthesizer.clean_text(dirty_text) == "Hello ECHO"
 
-    # Enforce maximum text length bound (1000 characters)
-    huge_text = "a" * 1500
+    # Enforce maximum text length bound
+    huge_text = "a" * (BaseSpeechSynthesizer.MAX_TEXT_LENGTH + 500)
     cleaned = BaseSpeechSynthesizer.clean_text(huge_text)
     assert len(cleaned) == BaseSpeechSynthesizer.MAX_TEXT_LENGTH
 

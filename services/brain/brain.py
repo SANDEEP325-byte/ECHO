@@ -269,6 +269,10 @@ class ECHOBrain:
                 return response_generator.generate_fallback_response(str(exc))
 
             if execution_result.requires_confirmation:
+                request.result = execution_result
+                if execution_result.pending_action:
+                    request.context["pending_action_id"] = execution_result.pending_action.get("action_id")
+                    request.context["requires_confirmation"] = True
                 response = response_generator.generate_confirmation_prompt(
                     execution_result.pending_action
                 )
@@ -453,15 +457,15 @@ class ECHOBrain:
         logger.info("Brain completed request")
         return response
 
-    def confirm_action(self, action_id: str) -> ConfirmationResult:
+    def confirm_action(self, action_id: str, session_id: str | None = None) -> ConfirmationResult:
         """Confirm and resume an unexpired pending action through the execution pipeline."""
-        logger.info("ECHOBrain confirming action: {}", action_id)
-        return execution_engine.resume_pending_action(action_id)
+        logger.info("ECHOBrain confirming action: {} (session={})", action_id, session_id)
+        return execution_engine.resume_pending_action(action_id, session_id=session_id)
 
-    def cancel_action(self, action_id: str) -> ConfirmationResult:
+    def cancel_action(self, action_id: str, session_id: str | None = None) -> ConfirmationResult:
         """Cancel a pending action, permanently preventing execution."""
-        logger.info("ECHOBrain cancelling action: {}", action_id)
-        return execution_engine.cancel_pending_action(action_id)
+        logger.info("ECHOBrain cancelling action: {} (session={})", action_id, session_id)
+        return execution_engine.cancel_pending_action(action_id, session_id=session_id)
 
     def get_pending_action(self, action_id: str) -> PendingAction | None:
         """Retrieve details of a pending action by its identifier."""

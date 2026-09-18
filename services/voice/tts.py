@@ -20,7 +20,7 @@ from services.voice.errors import ModelUnavailableError, SynthesisError
 class BaseSpeechSynthesizer(SpeechSynthesizer, ABC):
     """Base class for speech synthesizers providing text sanitization and bounding."""
 
-    MAX_TEXT_LENGTH = 1000  # Maximum characters per synthesis request
+    MAX_TEXT_LENGTH = 3000  # Maximum characters per synthesis request
     DEFAULT_SAMPLE_RATE = 22050
     DEFAULT_CHANNELS = 1
     DEFAULT_SAMPLE_WIDTH = 2  # 16-bit PCM
@@ -55,6 +55,11 @@ class MockSpeechSynthesizer(BaseSpeechSynthesizer):
         self.is_model_available_flag = is_model_available
         self.simulate_error = simulate_error
         self.synthesized_calls: list[int] = []
+
+    @property
+    def synthesize_count(self) -> int:
+        """Total number of speech synthesis calls simulated."""
+        return len(self.synthesized_calls)
 
     def is_available(self) -> bool:
         """Return configured model availability status."""

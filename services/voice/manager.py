@@ -17,6 +17,7 @@ import asyncio
 import time
 from typing import Any
 
+from packages.interfaces.pending_action import ConfirmationResult
 from packages.interfaces.request import Request
 from packages.interfaces.voice import (
     AudioInput,
@@ -31,6 +32,7 @@ from packages.interfaces.voice import (
 from services.logging.logger import logger  # type: ignore[attr-defined]
 from services.voice.audio_input import MockAudioInput
 from services.voice.audio_output import MockAudioOutput
+from services.voice.confirmation import ConfirmationIntent, VoiceConfirmationValidator
 from services.voice.errors import (
     AudioInputError,
     AudioOutputError,
@@ -144,6 +146,43 @@ class VoiceManager:
             )
 
             brain_resp = await self.brain.process(req)
+
+            # Check if this request requires confirmation
+            requires_confirm = bool(
+                req.context.get("requires_confirmation")
+                or (
+                    hasattr(req, "result")
+                    and req.result
+                    and getattr(req.result, "requires_confirmation", False)
+                )
+            )
+            pending_action_id = req.context.get("pending_action_id")
+            if not pending_action_id and hasattr(req, "result") and req.result:
+                pending_act = getattr(req.result, "pending_action", None)
+                if isinstance(pending_act, dict):
+                    pending_action_id = pending_act.get("action_id")
+
+            if requires_confirm and pending_action_id:
+                # Format safe human-readable confirmation prompt without raw arguments
+                pending_act = (
+                    getattr(req.result, "pending_action", None) if hasattr(req, "result") else None
+                )
+                tool_name = pending_act.get("tool", "") if isinstance(pending_act, dict) else ""
+                args = pending_act.get("arguments", {}) if isinstance(pending_act, dict) else {}
+                safe_prompt = VoiceConfirmationValidator.format_safe_prompt(tool_name, args)
+
+                controller.request_confirmation(pending_action_id)
+                return VoiceProcessResult(
+                    success=True,
+                    session_id=controller.session_id,
+                    transcription=transcription_text,
+                    brain_response=brain_resp,
+                    duration_seconds=time.time() - start_time,
+                    state=VoiceSessionState.WAITING_CONFIRMATION,
+                    requires_confirmation=True,
+                    pending_action_id=pending_action_id,
+                    confirmation_prompt=safe_prompt,
+                )
 
             controller.complete(transcription=transcription_text)
             return VoiceProcessResult(
@@ -358,11 +397,100 @@ class VoiceManager:
             if self.audio_input.is_recording:
                 self.audio_input.stop_recording()
 
+    async def listen_for_confirmation(
+        self,
+        session_id: str | None = None,
+        timeout_seconds: float = 10.0,
+        sample_rate: int = 16000,
+    ) -> str:
+        """Capture user confirmation utterance in a strictly bounded window.
+
+        Enforces:
+        - Bounded duration (timeout_seconds)
+        - VAD silence detection
+        - Immediate deletion of raw audio buffer (zero disk files)
+        - Untrusted transcription text returned for validation
+        """
+        start_time = time.time()
+        self.vad.reset()
+
+        try:
+            self.audio_input.start_recording(sample_rate=sample_rate)
+            while self.audio_input.is_recording and (time.time() - start_time) < timeout_seconds:
+                chunk = self.audio_input.read_chunk()
+                if chunk is not None:
+                    self.vad.is_speech(chunk.data, sample_rate=sample_rate)
+                    if hasattr(self.vad, "is_silence_timeout") and self.vad.is_silence_timeout():
+                        logger.info(
+                            "Silence detected during confirmation listen; stopping recording."
+                        )
+                        break
+                else:
+                    await asyncio.sleep(0.01)
+
+            raw_audio = self.audio_input.stop_recording()
+            if not raw_audio:
+                return ""
+
+            rec = self.speech_recognizer.transcribe(raw_audio)
+            del raw_audio
+            return rec.text.strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error during confirmation listening: %s", exc)
+            return ""
+        finally:
+            if self.audio_input.is_recording:
+                self.audio_input.stop_recording()
+
+    async def resolve_voice_confirmation(
+        self,
+        session_id: str,
+        pending_action_id: str,
+        user_utterance: str,
+        speak_outcome: bool = True,
+    ) -> tuple[ConfirmationIntent, ConfirmationResult | None, str]:
+        """Validate intent and dispatch confirmation to Brain without direct tool execution.
+
+        Enforces:
+        - Strict closed-set matching via VoiceConfirmationValidator (zero fuzzy matching)
+        - Execution resumes strictly through ECHOBrain.confirm_action -> ExecutionEngine
+        - Cancellation handled via ECHOBrain.cancel_action
+        - Ambiguous utterances NEVER execute any tool
+        - No tool or engine is ever directly imported or invoked
+        """
+        intent = VoiceConfirmationValidator.validate(user_utterance)
+
+        if intent == ConfirmationIntent.CONFIRM:
+            # Reuses ECHOBrain.confirm_action -> ExecutionEngine.resume_pending_action
+            confirm_res = self.brain.confirm_action(pending_action_id, session_id=session_id)
+            if confirm_res.success:
+                msg = f"Action confirmed and executed successfully: {confirm_res.result}"
+            else:
+                msg = f"Action execution failed: {confirm_res.message}"
+            if speak_outcome:
+                await self.speak(msg, session_id=session_id)
+            return intent, confirm_res, msg
+
+        if intent == ConfirmationIntent.CANCEL:
+            # Reuses ECHOBrain.cancel_action -> ExecutionEngine.cancel_pending_action
+            cancel_res = self.brain.cancel_action(pending_action_id, session_id=session_id)
+            msg = "Action cancelled."
+            if speak_outcome:
+                await self.speak(msg, session_id=session_id)
+            return intent, cancel_res, msg
+
+        # AMBIGUOUS: Never execute tools on ambiguity!
+        msg = "Confirmation unclear. Action was not executed. Please say yes to confirm or no to cancel."
+        if speak_outcome:
+            await self.speak(msg, session_id=session_id)
+        return intent, None, msg
+
     async def process_voice_interaction(
         self,
         speak_response: bool = True,
         session_id: str | None = None,
         max_duration_seconds: float = 15.0,
+        handle_confirmation_flow: bool = True,
     ) -> VoiceProcessResult:
         """Coordinate full voice interaction: capture, STT, Brain execution, and optional TTS.
 
@@ -375,7 +503,39 @@ class VoiceManager:
             max_duration_seconds=max_duration_seconds,
         )
 
-        # 2. Optionally speak response via TTS if successful and response exists
+        # 2. Check if the interaction requires human confirmation
+        if result.requires_confirmation and result.pending_action_id and handle_confirmation_flow:
+            # Vocalize safe human-readable prompt without raw dicts, IDs, or secrets
+            prompt_to_speak = (
+                result.confirmation_prompt
+                or "This action requires confirmation before proceeding. Say yes to confirm or no to cancel."
+            )
+            if speak_response:
+                await self.speak(prompt_to_speak, session_id=result.session_id)
+
+            # Bounded listen specifically for confirmation response
+            confirm_utterance = await self.listen_for_confirmation(session_id=result.session_id)
+            if not confirm_utterance:
+                timeout_msg = "Confirmation timed out. Action not executed."
+                if speak_response:
+                    await self.speak(timeout_msg, session_id=result.session_id)
+                result.state = VoiceSessionState.COMPLETED
+                result.brain_response = timeout_msg
+                return result
+
+            # Resolve confirmation through canonical Brain APIs
+            _intent, confirm_res, outcome_msg = await self.resolve_voice_confirmation(
+                session_id=result.session_id,
+                pending_action_id=result.pending_action_id,
+                user_utterance=confirm_utterance,
+                speak_outcome=speak_response,
+            )
+            result.confirmation_result = confirm_res
+            result.brain_response = outcome_msg
+            result.state = VoiceSessionState.COMPLETED
+            return result
+
+        # 3. Standard response vocalization
         if speak_response and result.success and result.brain_response:
             await self.speak(result.brain_response, session_id=result.session_id)
 

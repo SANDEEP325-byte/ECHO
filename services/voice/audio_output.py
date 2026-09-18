@@ -40,6 +40,11 @@ class MockAudioOutput(BaseAudioOutput):
         self.simulate_error = simulate_error
         self.played_payloads: list[int] = []  # Lengths only, preserving audio privacy
 
+    @property
+    def play_count(self) -> int:
+        """Total number of audio play calls simulated."""
+        return len(self.played_payloads)
+
     def play(self, audio_data: bytes, sample_rate: int = 16000, channels: int = 1) -> None:
         """Simulate playing raw PCM audio bytes."""
         with self._lock:

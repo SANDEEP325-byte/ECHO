@@ -29,6 +29,10 @@ from services.voice.audio_output import (
     MockAudioOutput,
     SoundDeviceAudioOutput,
 )
+from services.voice.confirmation import (
+    ConfirmationIntent,
+    VoiceConfirmationValidator,
+)
 from services.voice.errors import (
     AudioInputError,
     AudioOutputError,
@@ -71,6 +75,7 @@ __all__ = [
     "BaseSpeechSynthesizer",
     "BaseVAD",
     "BaseWakeDetector",
+    "ConfirmationIntent",
     "EnergyVAD",
     "FasterWhisperRecognizer",
     "LocalEnergyWakeDetector",
@@ -91,6 +96,7 @@ __all__ = [
     "SpeechSynthesizer",
     "SynthesisError",
     "SynthesizedAudio",
+    "VoiceConfirmationValidator",
     "VoiceError",
     "VoiceManager",
     "VoiceProcessResult",

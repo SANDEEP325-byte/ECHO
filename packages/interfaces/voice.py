@@ -9,6 +9,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 from uuid import uuid4
 
 
@@ -18,6 +19,7 @@ class VoiceSessionState(str, Enum):
     IDLE = "idle"
     LISTENING = "listening"
     PROCESSING = "processing"
+    WAITING_CONFIRMATION = "waiting_confirmation"
     SPEAKING = "speaking"
     COMPLETED = "completed"
     ERROR = "error"
@@ -65,6 +67,7 @@ class VoiceSession:
     max_duration_seconds: float = 15.0
     silence_threshold_seconds: float = 2.0
     transcription: str = ""
+    pending_action_id: str | None = None
     error: str | None = None
 
     @property
@@ -87,6 +90,10 @@ class VoiceProcessResult:
     brain_response: str | None = None
     duration_seconds: float = 0.0
     state: VoiceSessionState = VoiceSessionState.COMPLETED
+    requires_confirmation: bool = False
+    pending_action_id: str | None = None
+    confirmation_prompt: str | None = None
+    confirmation_result: Any | None = None
     error: str | None = None
 
 

@@ -153,6 +153,7 @@ class ExecutionEngine:
                     risk_level=safety_result.risk_level,
                     request_id=request.request_id,
                     step_number=step.step_number,
+                    session_id=request.session_id,
                 )
 
                 return ExecutionResult(
@@ -216,7 +217,11 @@ class ExecutionEngine:
             result=results,
         )
 
-    def resume_pending_action(self, action_id: str) -> ConfirmationResult:
+    def resume_pending_action(
+        self,
+        action_id: str,
+        session_id: str | None = None,
+    ) -> ConfirmationResult:
         """Execute a previously confirmed pending action through the security and tool pipeline.
         
         Guarantees:
@@ -224,8 +229,11 @@ class ExecutionEngine:
         2. Atomic single-use claiming (replay & race condition prevention).
         3. Mandatory safety re-check (SafetyEngine & ToolInvocation validation).
         4. Structured non-leaking response.
+        5. Session binding enforcement for voice-bound actions.
         """
-        claimed, action, status, message = self.pending_action_manager.claim_for_execution(action_id)
+        claimed, action, status, message = self.pending_action_manager.claim_for_execution(
+            action_id, session_id=session_id
+        )
         if not claimed or action is None:
             return ConfirmationResult(
                 success=False,
@@ -359,9 +367,13 @@ class ExecutionEngine:
             verification=v_res,
         )
 
-    def cancel_pending_action(self, action_id: str) -> ConfirmationResult:
+    def cancel_pending_action(
+        self,
+        action_id: str,
+        session_id: str | None = None,
+    ) -> ConfirmationResult:
         """Cancel a pending action, permanently preventing execution."""
-        return self.pending_action_manager.cancel_action(action_id)
+        return self.pending_action_manager.cancel_action(action_id, session_id=session_id)
 
 
 execution_engine = ExecutionEngine()

@@ -33,12 +33,15 @@ class MockSpeechRecognizer(BaseSpeechRecognizer):
     def __init__(
         self,
         default_transcript: str = "open terminal",
+        transcripts: list[str] | None = None,
         confidence: float = 0.95,
         language: str = "en",
         simulate_error: str | None = None,
         is_model_available: bool = True,
     ) -> None:
         self.default_transcript = default_transcript
+        self.transcripts = list(transcripts) if transcripts is not None else None
+        self._call_index = 0
         self.confidence = confidence
         self.language = language
         self.simulate_error = simulate_error
@@ -65,7 +68,13 @@ class MockSpeechRecognizer(BaseSpeechRecognizer):
         bytes_per_second = sample_rate * 2
         duration = len(audio_bytes) / bytes_per_second if bytes_per_second > 0 else 0.0
 
-        clean_text = self.normalize_text(self.default_transcript)
+        if self.transcripts and self._call_index < len(self.transcripts):
+            current_transcript = self.transcripts[self._call_index]
+            self._call_index += 1
+        else:
+            current_transcript = self.default_transcript
+
+        clean_text = self.normalize_text(current_transcript)
         return RecognitionResult(
             text=clean_text,
             confidence=self.confidence,
