@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-
 from packages.interfaces.pending_action import (
     ConfirmationResult,
     PendingAction,
@@ -12,9 +10,9 @@ from services.brain.execution import execution_engine
 from services.brain.gateway import ai_gateway
 from services.brain.intent_router import Intent
 from services.brain.planner import planner
-from services.brain.reasoning import reasoning_engine, TaskType
+from services.brain.reasoning import reasoning_engine
 from services.brain.request_analyzer import request_analyzer
-from services.brain.response_generator import response_generator, ResponseGenerator
+from services.brain.response_generator import ResponseGenerator, response_generator
 from services.brain.tool_router import tool_router
 from services.brain.tool_selector import tool_selector
 from services.brain.verification import verification_engine
@@ -27,7 +25,7 @@ from services.memory.persistent import persistent_memory
 
 class ECHOBrain:
     """Central coordinator for ECHO's cognitive reasoning, planning, and execution.
-    
+
     Orchestrates the cognitive cycle:
     Think (ReasoningEngine) → Remember (ContextBuilder) → Plan (Planner) → Act (ExecutionEngine) → Verify (VerificationEngine)
     """
@@ -91,9 +89,7 @@ class ECHOBrain:
         intent: Intent,
         user_message: str,
     ) -> str | None:
-        tool_name = tool_router.get_tool_for_intent(
-            intent.value
-        )
+        tool_name = tool_router.get_tool_for_intent(intent.value)
 
         if tool_name is None:
             return None
@@ -111,37 +107,42 @@ class ECHOBrain:
 
         return str(result)
 
-    async def process(self, user_message: str) -> str:
+    async def process(self, user_message: str | Request) -> str:
+        if isinstance(user_message, Request):
+            request = user_message
+            msg_text = request.user_input
+        else:
+            msg_text = user_message
+            request = Request(
+                user_input=msg_text,
+            )
+
         logger.info("Brain processing request")
 
-        trimmed = user_message.strip()
+        trimmed = msg_text.strip()
         if trimmed.startswith("/confirm "):
-            target_id = trimmed[len("/confirm "):].strip()
+            target_id = trimmed[len("/confirm ") :].strip()
             confirm_res = self.confirm_action(target_id)
             if confirm_res.success:
                 resp_text = f"Action '{target_id}' confirmed and executed successfully: {confirm_res.result}"
             else:
                 resp_text = f"Action confirmation failed: {confirm_res.message}"
             if self.memory_manager is not None:
-                self.memory_manager.save_message(role="user", content=user_message)
+                self.memory_manager.save_message(role="user", content=msg_text)
                 self.memory_manager.save_message(role="assistant", content=resp_text)
             return resp_text
 
         if trimmed.startswith("/cancel "):
-            target_id = trimmed[len("/cancel "):].strip()
+            target_id = trimmed[len("/cancel ") :].strip()
             cancel_res = self.cancel_action(target_id)
             if cancel_res.success:
                 resp_text = f"Action '{target_id}' has been cancelled."
             else:
                 resp_text = f"Action cancellation failed: {cancel_res.message}"
             if self.memory_manager is not None:
-                self.memory_manager.save_message(role="user", content=user_message)
+                self.memory_manager.save_message(role="user", content=msg_text)
                 self.memory_manager.save_message(role="assistant", content=resp_text)
             return resp_text
-
-        request = Request(
-            user_input=user_message,
-        )
 
         # 1. Analyze Request
         try:
@@ -194,9 +195,8 @@ class ECHOBrain:
             reasoning_decision = None
 
         # 4. Planning (Plan)
-        requires_planning = (
-            request.complexity == "complex"
-            or (reasoning_decision is not None and reasoning_decision.requires_planning)
+        requires_planning = request.complexity == "complex" or (
+            reasoning_decision is not None and reasoning_decision.requires_planning
         )
 
         try:
@@ -273,10 +273,10 @@ class ECHOBrain:
                     execution_result.pending_action
                 )
                 if self.memory_manager is not None:
-                    self.memory_manager.save_message(role="user", content=user_message)
+                    self.memory_manager.save_message(role="user", content=msg_text)
                     self.memory_manager.save_message(role="assistant", content=response)
                 else:
-                    persistent_memory.save_message(role="user", content=user_message)
+                    persistent_memory.save_message(role="user", content=msg_text)
                     persistent_memory.save_message(role="assistant", content=response)
                 return response
 
@@ -330,7 +330,7 @@ class ECHOBrain:
         messages.append(
             Message(
                 role="user",
-                content=user_message,
+                content=msg_text,
             )
         )
 
@@ -384,19 +384,19 @@ class ECHOBrain:
 
         elif intent == Intent.MEMORY_SAVE:
             response = self._save_memory(
-                user_message,
+                msg_text,
                 memory_manager=self.memory_manager,
             )
 
         elif intent == Intent.MEMORY_RECALL:
             response = self._recall_memory(
-                user_message,
+                msg_text,
                 memory_manager=self.memory_manager,
             )
 
         elif intent == Intent.MEMORY_DELETE:
             response = self._delete_memory(
-                user_message,
+                msg_text,
                 memory_manager=self.memory_manager,
             )
 
@@ -406,7 +406,7 @@ class ECHOBrain:
         else:
             tool_result = self._execute_tool_for_intent(
                 intent,
-                user_message,
+                msg_text,
             )
 
             if tool_result is not None:
@@ -434,7 +434,7 @@ class ECHOBrain:
         if self.memory_manager is not None:
             self.memory_manager.save_message(
                 role="user",
-                content=user_message,
+                content=msg_text,
             )
             self.memory_manager.save_message(
                 role="assistant",
@@ -443,7 +443,7 @@ class ECHOBrain:
         else:
             persistent_memory.save_message(
                 role="user",
-                content=user_message,
+                content=msg_text,
             )
             persistent_memory.save_message(
                 role="assistant",
