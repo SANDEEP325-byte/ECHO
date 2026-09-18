@@ -1,11 +1,12 @@
-from typing import Any
+from typing import Any, ClassVar
 
 from packages.interfaces.security import RiskLevel
+
 
 class RiskClassifier:
     """Classifies ECHO operations according to their security risk."""
 
-    SAFE_OPERATIONS = {
+    SAFE_OPERATIONS: ClassVar[set[str]] = {
         "calculator",
         "time",
         "date",
@@ -17,9 +18,12 @@ class RiskClassifier:
         "search",
         "weather",
         "browser_read_page",
+        "inspect_code_tree",
+        "search_code",
+        "read_code",
     }
 
-    MODERATE_OPERATIONS = {
+    MODERATE_OPERATIONS: ClassVar[set[str]] = {
         "terminal",
         "open_vscode",
         "open_chrome",
@@ -31,7 +35,7 @@ class RiskClassifier:
         "browser_type",
     }
 
-    SENSITIVE_OPERATIONS = {
+    SENSITIVE_OPERATIONS: ClassVar[set[str]] = {
         "delete_file",
         "delete_folder",
         "rename_file",
@@ -43,9 +47,11 @@ class RiskClassifier:
         "run_command",
         "browser_download",
         "browser_upload",
+        "modify_code",
+        "apply_patch",
     }
 
-    CRITICAL_OPERATIONS = {
+    CRITICAL_OPERATIONS: ClassVar[set[str]] = {
         "format_drive",
         "remove_repository",
         "massive_delete",
@@ -101,8 +107,20 @@ class RiskClassifier:
                     return RiskLevel.SENSITIVE
                 selector = str(arguments.get("selector", "")).lower()
                 browser_sensitive_click_keywords = (
-                    "submit", "buy", "purchase", "delete", "remove", "pay", "checkout",
-                    "transfer", "login", "logout", "confirm", "publish", "create", "account",
+                    "submit",
+                    "buy",
+                    "purchase",
+                    "delete",
+                    "remove",
+                    "pay",
+                    "checkout",
+                    "transfer",
+                    "login",
+                    "logout",
+                    "confirm",
+                    "publish",
+                    "create",
+                    "account",
                 )
                 if any(k in selector for k in browser_sensitive_click_keywords):
                     return RiskLevel.SENSITIVE
@@ -112,8 +130,18 @@ class RiskClassifier:
                     return RiskLevel.SENSITIVE
                 selector = str(arguments.get("selector", "")).lower()
                 sensitive_field_keywords = (
-                    "password", "pass", "pwd", "secret", "token", "key", "pin", "ssn",
-                    "credit", "card", "cvv", "auth",
+                    "password",
+                    "pass",
+                    "pwd",
+                    "secret",
+                    "token",
+                    "key",
+                    "pin",
+                    "ssn",
+                    "credit",
+                    "card",
+                    "cvv",
+                    "auth",
                 )
                 if any(k in selector for k in sensitive_field_keywords):
                     return RiskLevel.SENSITIVE
@@ -121,7 +149,16 @@ class RiskClassifier:
             if normalized == "browser_download":
                 dest = str(arguments.get("destination_path", "")).lower()
                 dangerous_exts = (
-                    ".exe", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".msi", ".dll", ".sys", ".scr"
+                    ".exe",
+                    ".bat",
+                    ".cmd",
+                    ".ps1",
+                    ".vbs",
+                    ".js",
+                    ".msi",
+                    ".dll",
+                    ".sys",
+                    ".scr",
                 )
                 if any(dest.endswith(ext) for ext in dangerous_exts) or dest.startswith(r"\\"):
                     return RiskLevel.CRITICAL
@@ -130,7 +167,14 @@ class RiskClassifier:
             if normalized == "browser_upload":
                 src = str(arguments.get("file_path", "")).lower()
                 sensitive_targets = (
-                    "id_rsa", "id_ed25519", ".pem", ".key", "credentials", ".secrets", ".ssh", ".aws"
+                    "id_rsa",
+                    "id_ed25519",
+                    ".pem",
+                    ".key",
+                    "credentials",
+                    ".secrets",
+                    ".ssh",
+                    ".aws",
                 )
                 if any(t in src for t in sensitive_targets) or src.startswith(r"\\"):
                     return RiskLevel.CRITICAL
