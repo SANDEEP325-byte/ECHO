@@ -16,6 +16,7 @@ dependencies = [
     "rich",
     "loguru",
     "chromadb",
+    "playwright",
 ]
 
 [project.optional-dependencies]
