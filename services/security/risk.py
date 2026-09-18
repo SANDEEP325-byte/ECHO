@@ -16,6 +16,7 @@ class RiskClassifier:
         "open_folder",
         "search",
         "weather",
+        "browser_read_page",
     }
 
     MODERATE_OPERATIONS = {
@@ -25,6 +26,9 @@ class RiskClassifier:
         "run_npm",
         "copy_file",
         "open_application",
+        "browser_navigate",
+        "browser_click",
+        "browser_type",
     }
 
     SENSITIVE_OPERATIONS = {
@@ -88,6 +92,29 @@ class RiskClassifier:
                 return RiskLevel.CRITICAL
             if any(pattern in payload_str for pattern in cls.SENSITIVE_PATTERNS):
                 return RiskLevel.SENSITIVE
+
+            # Specific browser interaction classification
+            if normalized == "browser_click":
+                if arguments.get("is_submit") is True:
+                    return RiskLevel.SENSITIVE
+                selector = str(arguments.get("selector", "")).lower()
+                browser_sensitive_click_keywords = (
+                    "submit", "buy", "purchase", "delete", "remove", "pay", "checkout",
+                    "transfer", "login", "logout", "confirm", "publish", "create", "account",
+                )
+                if any(k in selector for k in browser_sensitive_click_keywords):
+                    return RiskLevel.SENSITIVE
+
+            if normalized == "browser_type":
+                if arguments.get("is_sensitive") is True or arguments.get("submit") is True:
+                    return RiskLevel.SENSITIVE
+                selector = str(arguments.get("selector", "")).lower()
+                sensitive_field_keywords = (
+                    "password", "pass", "pwd", "secret", "token", "key", "pin", "ssn",
+                    "credit", "card", "cvv", "auth",
+                )
+                if any(k in selector for k in sensitive_field_keywords):
+                    return RiskLevel.SENSITIVE
 
         # 2. Base operation classification
         if normalized in cls.SAFE_OPERATIONS:

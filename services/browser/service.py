@@ -278,6 +278,10 @@ class BrowserService:
                 if hasattr(context, "set_default_timeout"):
                     context.set_default_timeout(self.default_timeout_ms)
 
+                # Phase 5C: Install route interception for SSRF & subresource protection
+                if hasattr(context, "route"):
+                    await context.route("**/*", self._handle_route_interception)
+
                 # Create primary page
                 page = await context.new_page()
 
@@ -357,3 +361,62 @@ class BrowserService:
                 logger.debug("Error closing idle session '%s': %s", session.session_id, exc)
 
         return closed_count
+
+    async def _handle_route_interception(self, route: Any, request: Any) -> None:
+        """Intercept and validate all outgoing browser requests against security policy.
+
+        Protects against SSRF, subresource attacks, and unexpected protocol navigation.
+        Fails closed on any error.
+        """
+        try:
+            url = getattr(request, "url", "")
+            if not url:
+                await route.abort("blockedbyclient")
+                return
+
+            # Allow internal blank page transitions
+            if url == "about:blank":
+                await route.continue_()
+                return
+
+            check = self.security_policy.validate_url(url)
+            if not check.allowed:
+                logger.warning(
+                    "Blocked unsafe browser request to '%s': %s (code=%s)",
+                    url,
+                    check.reason,
+                    check.reason_code,
+                )
+                await route.abort("blockedbyclient")
+                return
+
+            await route.continue_()
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Error during request route interception for '%s': %s",
+                getattr(request, "url", ""),
+                exc,
+            )
+            # Fail closed on any exception
+            try:
+                await route.abort("blockedbyclient")
+            except Exception as abort_exc:  # noqa: BLE001
+                logger.debug("Failed to abort route: %s", abort_exc)
+
+    async def get_or_create_default_session(self) -> BrowserSession:
+        """Retrieve the most recently active session, or start the service and create one."""
+        if not self.is_running:
+            await self.start()
+
+        async with self._session_lock:
+            active = [s for s in self._sessions.values() if s.is_active()]
+            if active:
+                active.sort(key=lambda s: s.last_accessed_at, reverse=True)
+                session = active[0]
+                session.touch()
+                return session
+
+        return await self.create_session()
+
+
+browser_service = BrowserService()

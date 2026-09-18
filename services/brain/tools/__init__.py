@@ -6,6 +6,7 @@ from services.brain.tools.date import date_tool
 from services.brain.tools.filesystem_tools import ALL_FILESYSTEM_TOOLS
 from services.brain.tools.launch_tools import ALL_LAUNCH_TOOLS
 from services.brain.tools.command_tools import ALL_COMMAND_TOOLS
+from services.brain.tools.browser_tools import ALL_BROWSER_TOOLS
 
 
 def register_builtin_tools() -> None:
@@ -18,6 +19,7 @@ def register_builtin_tools() -> None:
         *ALL_FILESYSTEM_TOOLS,
         *ALL_LAUNCH_TOOLS,
         *ALL_COMMAND_TOOLS,
+        *ALL_BROWSER_TOOLS,
     ]
 
     for tool in tools:

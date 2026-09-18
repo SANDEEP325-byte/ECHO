@@ -30,8 +30,26 @@ class SafetyEngine:
         risk_level = risk_classifier.classify(normalized, arguments=arguments)
         
         decision = permission_manager.decide(risk_level)
-        
-        if decision == PermissionDecision.ALLOW:
+
+        # Specialized policy check for browser navigation targets
+        if normalized == "browser_navigate" and arguments and "url" in arguments:
+            from services.browser.policy import browser_security_policy
+
+            url_check = browser_security_policy.validate_url(str(arguments["url"]))
+            if not url_check.allowed:
+                if url_check.decision == PermissionDecision.CONFIRM:
+                    decision = PermissionDecision.CONFIRM
+                    risk_level = RiskLevel.SENSITIVE
+                    reason = url_check.reason
+                else:
+                    decision = PermissionDecision.BLOCK
+                    risk_level = RiskLevel.CRITICAL
+                    reason = url_check.reason
+            else:
+                decision = PermissionDecision.ALLOW
+                risk_level = RiskLevel.SAFE
+                reason = url_check.reason
+        elif decision == PermissionDecision.ALLOW:
             reason = "Operation is allowed."
             
         elif decision == PermissionDecision.CONFIRM:

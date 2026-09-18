@@ -481,6 +481,159 @@ class VerificationEngine:
                     observed="Command executed successfully (exit code 0, bounded output)",
                 )
 
+            elif op == "browser_navigate":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser navigation failed.",
+                        expected="Successful navigation",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+
+                url = meta.get("url")
+                if not url or not isinstance(url, str):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser navigation produced no valid destination URL.",
+                        expected="Valid destination URL",
+                        observed="Missing destination URL",
+                    )
+
+                from services.browser.policy import browser_security_policy
+
+                policy_check = browser_security_policy.validate_url(url)
+                if not policy_check.allowed:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Navigation destination violates browser security policy: {policy_check.reason}",
+                        expected="Compliant destination URL",
+                        observed=f"Policy violation: {policy_check.reason}",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser successfully navigated to '{url}'.",
+                    expected=f"Navigation to authorized URL '{url}'",
+                    observed=f"Navigated to '{url}' (status={meta.get('status')})",
+                )
+
+            elif op == "browser_read_page":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Reading browser page failed.",
+                        expected="Successful page read",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+
+                content_len = meta.get("content_length", 0)
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser page inspection verified ({content_len} characters extracted).",
+                    expected="Safe readable text extraction",
+                    observed=f"Extracted {content_len} characters (truncated={meta.get('truncated', False)})",
+                )
+
+            elif op == "browser_click":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser click operation failed.",
+                        expected="Successful element click",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+
+                selector = meta.get("selector", "")
+                if not selector:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser click metadata missing selector.",
+                        expected="Target selector",
+                        observed="Missing selector",
+                    )
+
+                if meta.get("navigation_occurred"):
+                    nav_url = meta.get("url")
+                    if nav_url and nav_url != "about:blank":
+                        from services.browser.policy import browser_security_policy
+
+                        policy_check = browser_security_policy.validate_url(nav_url)
+                        if not policy_check.allowed:
+                            return VerificationDetail(
+                                operation=op,
+                                status=VerificationStatus.VERIFICATION_ERROR,
+                                message=f"Post-click destination violates browser security policy: {policy_check.reason}",
+                                expected="Compliant destination URL",
+                                observed=f"Policy violation: {policy_check.reason}",
+                            )
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFIED,
+                        message=f"Browser click on '{selector}' verified with navigation to '{nav_url}'.",
+                        expected=f"Click on '{selector}'",
+                        observed=f"Click succeeded, navigated to '{nav_url}'",
+                    )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser click on '{selector}' verified.",
+                    expected=f"Click on '{selector}'",
+                    observed="Element clicked successfully without navigation",
+                )
+
+            elif op == "browser_type":
+                if not meta.get("success"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser text input operation failed.",
+                        expected="Successful text input",
+                        observed=f"Failure: {meta.get('error', 'Execution unsuccessful')}",
+                    )
+
+                selector = meta.get("selector", "")
+                if not selector:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Browser type metadata missing selector.",
+                        expected="Target selector",
+                        observed="Missing selector",
+                    )
+
+                if meta.get("submitted") and meta.get("url"):
+                    nav_url = meta.get("url")
+                    if nav_url and nav_url != "about:blank":
+                        from services.browser.policy import browser_security_policy
+
+                        policy_check = browser_security_policy.validate_url(nav_url)
+                        if not policy_check.allowed:
+                            return VerificationDetail(
+                                operation=op,
+                                status=VerificationStatus.VERIFICATION_ERROR,
+                                message=f"Post-submit destination violates browser security policy: {policy_check.reason}",
+                                expected="Compliant destination URL",
+                                observed=f"Policy violation: {policy_check.reason}",
+                            )
+
+                text_len = meta.get("text_length", 0)
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Browser text input into '{selector}' verified ({text_len} characters).",
+                    expected=f"Text entered into '{selector}'",
+                    observed=f"Entered {text_len} characters (submitted={meta.get('submitted', False)})",
+                )
+
             else:
                 return VerificationDetail(
                     operation=str(op),
