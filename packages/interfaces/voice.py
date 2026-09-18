@@ -21,6 +21,7 @@ class VoiceSessionState(str, Enum):
     SPEAKING = "speaking"
     COMPLETED = "completed"
     ERROR = "error"
+    CLOSED = "closed"
 
 
 @dataclass(frozen=True)
@@ -132,3 +133,59 @@ class BaseVAD(ABC):
     @abstractmethod
     def reset(self) -> None:
         """Reset internal silence/energy trackers."""
+
+
+@dataclass(frozen=True)
+class SynthesizedAudio:
+    """In-memory representation of synthesized speech audio."""
+
+    data: bytes
+    sample_rate: int = 22050
+    channels: int = 1
+    sample_width: int = 2  # 16-bit PCM
+    duration_seconds: float = 0.0
+
+
+class AudioOutput(ABC):
+    """Abstract interface for audio playback hardware or virtual sinks."""
+
+    @abstractmethod
+    def play(self, audio_data: bytes, sample_rate: int = 16000, channels: int = 1) -> None:
+        """Play raw PCM audio bytes through the output device."""
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Stop active audio playback immediately."""
+
+    @property
+    @abstractmethod
+    def is_playing(self) -> bool:
+        """Return True if currently outputting audio."""
+
+
+class SpeechSynthesizer(ABC):
+    """Abstract interface for offline Text-to-Speech (TTS) synthesis engines."""
+
+    @abstractmethod
+    def synthesize(self, text: str) -> SynthesizedAudio:
+        """Synthesize plain text into in-memory PCM audio bytes."""
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Return True if TTS engine and model weights are available locally."""
+
+
+class WakeDetector(ABC):
+    """Abstract interface for local wake detection mechanisms."""
+
+    @abstractmethod
+    def detect(self, chunk: bytes, sample_rate: int = 16000) -> bool:
+        """Process an audio chunk and return True if a wake event is detected."""
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Return True if wake detector model/dependencies are available locally."""
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset internal detector state and history."""

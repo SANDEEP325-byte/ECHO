@@ -32,3 +32,15 @@ class RecognitionError(VoiceError):
 
 class VoiceSessionError(VoiceError):
     """Raised when an invalid state transition or session timeout occurs."""
+
+
+class AudioOutputError(VoiceError):
+    """Raised when audio playback fails or device is inaccessible."""
+
+
+class SynthesisError(VoiceError):
+    """Raised when Text-to-Speech synthesis fails on input text."""
+
+
+class WakeDetectionError(VoiceError):
+    """Raised when wake event detection fails."""

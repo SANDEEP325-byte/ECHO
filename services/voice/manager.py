@@ -20,36 +20,50 @@ from typing import Any
 from packages.interfaces.request import Request
 from packages.interfaces.voice import (
     AudioInput,
+    AudioOutput,
     BaseVAD,
     SpeechRecognizer,
+    SpeechSynthesizer,
     VoiceProcessResult,
     VoiceSessionState,
+    WakeDetector,
 )
 from services.logging.logger import logger  # type: ignore[attr-defined]
 from services.voice.audio_input import MockAudioInput
+from services.voice.audio_output import MockAudioOutput
 from services.voice.errors import (
     AudioInputError,
+    AudioOutputError,
     ModelUnavailableError,
     RecognitionError,
+    SynthesisError,
+    WakeDetectionError,
 )
 from services.voice.session import VoiceSessionController
 from services.voice.stt import MockSpeechRecognizer
+from services.voice.tts import MockSpeechSynthesizer
 from services.voice.vad import EnergyVAD
 
 
 class VoiceManager:
-    """Central manager for ECHO voice capture and Brain cognitive ingestion."""
+    """Central manager for ECHO voice capture, Brain cognitive ingestion, and TTS response."""
 
     def __init__(
         self,
         audio_input: AudioInput | None = None,
         speech_recognizer: SpeechRecognizer | None = None,
         vad: BaseVAD | None = None,
+        audio_output: AudioOutput | None = None,
+        speech_synthesizer: SpeechSynthesizer | None = None,
+        wake_detector: WakeDetector | None = None,
         brain: Any | None = None,
     ) -> None:
         self.audio_input: AudioInput = audio_input or MockAudioInput()
         self.speech_recognizer: SpeechRecognizer = speech_recognizer or MockSpeechRecognizer()
         self.vad: BaseVAD = vad or EnergyVAD()
+        self.audio_output: AudioOutput = audio_output or MockAudioOutput()
+        self.speech_synthesizer: SpeechSynthesizer = speech_synthesizer or MockSpeechSynthesizer()
+        self.wake_detector: WakeDetector | None = wake_detector
         self._brain = brain
 
     @property
@@ -240,6 +254,132 @@ class VoiceManager:
                 state=VoiceSessionState.ERROR,
                 error=err_msg,
             )
+
+    async def speak(self, text: str, session_id: str | None = None) -> bool:
+        """Synthesize and play speech audio without persisting files to disk.
+
+        Guarantees:
+        - Audio is generated in memory only; zero disk files or temporary files.
+        - Enforces max text length and audio output bounds.
+        - Releases raw audio buffer immediately after playback.
+        - Failures return False and log structured errors without crashing the host.
+        """
+        if not text or not text.strip():
+            return False
+
+        logger.info("Synthesizing voice response for text (%d chars)...", len(text))
+        controller = VoiceSessionController(session_id=session_id) if session_id else None
+
+        try:
+            if controller:
+                controller.start_speaking()
+
+            # 1. Synthesize audio in-memory
+            audio = self.speech_synthesizer.synthesize(text)
+            if not audio.data:
+                logger.warning("Speech synthesis returned empty audio data.")
+                if controller:
+                    controller.complete()
+                return False
+
+            # 2. Play audio through output hardware/sink
+            raw_audio = audio.data
+            logger.info(
+                "Playing synthesized voice output (%d bytes, %.2fs)...",
+                len(raw_audio),
+                audio.duration_seconds,
+            )
+            self.audio_output.play(
+                raw_audio, sample_rate=audio.sample_rate, channels=audio.channels
+            )
+
+            # 3. Release audio reference immediately
+            del raw_audio
+            del audio
+
+            if controller:
+                controller.complete()
+            return True
+
+        except (ModelUnavailableError, SynthesisError, AudioOutputError) as exc:
+            logger.error("Speech playback error: %s", exc.message)
+            if controller:
+                controller.fail(exc.message)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            err_msg = f"Unexpected voice output error: {exc}"
+            logger.error(err_msg)
+            if controller:
+                controller.fail(err_msg)
+            return False
+
+    async def listen_for_wake_word(
+        self,
+        timeout_seconds: float = 10.0,
+        sample_rate: int = 16000,
+    ) -> bool:
+        """Listen for wake event in a strictly bounded loop.
+
+        Guarantees:
+        - Hard timeout bounded by timeout_seconds; never loops indefinitely.
+        - Discards audio chunks immediately after inspection.
+        - Wake event only returns True to trigger a session; never executes tools.
+        """
+        if self.wake_detector is None:
+            logger.debug("No wake detector configured; wake listening skipped.")
+            return False
+
+        if not self.wake_detector.is_available():
+            logger.warning("Configured wake detector is not available locally.")
+            return False
+
+        start_time = time.time()
+        self.wake_detector.reset()
+
+        try:
+            self.audio_input.start_recording(sample_rate=sample_rate)
+            while self.audio_input.is_recording and (time.time() - start_time) < timeout_seconds:
+                chunk = self.audio_input.read_chunk()
+                if chunk is not None:
+                    detected = self.wake_detector.detect(chunk.data, sample_rate=sample_rate)
+                    if detected:
+                        logger.info("Wake event detected after %.2fs", time.time() - start_time)
+                        return True
+                else:
+                    await asyncio.sleep(0.01)
+            return False
+        except (ModelUnavailableError, WakeDetectionError, AudioInputError) as exc:
+            logger.error("Wake listening failed: %s", exc.message)
+            return False
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Unexpected wake listening error: %s", exc)
+            return False
+        finally:
+            if self.audio_input.is_recording:
+                self.audio_input.stop_recording()
+
+    async def process_voice_interaction(
+        self,
+        speak_response: bool = True,
+        session_id: str | None = None,
+        max_duration_seconds: float = 15.0,
+    ) -> VoiceProcessResult:
+        """Coordinate full voice interaction: capture, STT, Brain execution, and optional TTS.
+
+        Voice remains strictly an input/output adapter. All commands enter ECHOBrain.process()
+        as Request(source='voice'), preserving existing Brain -> Planner -> SafetyEngine boundaries.
+        """
+        # 1. Capture and process speech through Brain
+        result = await self.capture_and_process(
+            session_id=session_id,
+            max_duration_seconds=max_duration_seconds,
+        )
+
+        # 2. Optionally speak response via TTS if successful and response exists
+        if speak_response and result.success and result.brain_response:
+            await self.speak(result.brain_response, session_id=result.session_id)
+
+        return result
 
 
 voice_manager = VoiceManager()

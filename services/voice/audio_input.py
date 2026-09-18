@@ -59,12 +59,14 @@ class MockAudioInput(BaseAudioInput):
         canned_chunks: list[bytes] | None = None,
         max_recording_seconds: float = BaseAudioInput.MAX_RECORDING_SECONDS,
         simulate_error: str | None = None,
+        auto_stop_on_empty: bool = False,
     ) -> None:
         super().__init__(max_recording_seconds=max_recording_seconds)
         self._canned_chunks = list(canned_chunks) if canned_chunks is not None else []
         self._queue: deque[bytes] = deque()
         self._collected_bytes = bytearray()
         self._simulate_error = simulate_error
+        self.auto_stop_on_empty = auto_stop_on_empty
 
     def add_chunk(self, chunk: bytes) -> None:
         """Enqueue an audio chunk to be yielded by read_chunk."""
@@ -94,6 +96,8 @@ class MockAudioInput(BaseAudioInput):
                 return None
 
             if not self._queue:
+                if self.auto_stop_on_empty:
+                    self._is_recording = False
                 return None
 
             chunk_data = self._queue.popleft()
