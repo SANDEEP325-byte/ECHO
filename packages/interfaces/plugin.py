@@ -130,3 +130,7 @@ class Plugin(ABC):
         Every tool returned must have its bare name declared in manifest.tools.
         The PluginManager will namespace these tools as '<plugin_id>.<tool_name>'.
         """
+
+    def health_check(self) -> bool:
+        """Check if plugin is healthy. Default implementation returns True."""
+        return True

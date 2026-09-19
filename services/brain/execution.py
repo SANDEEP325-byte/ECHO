@@ -10,11 +10,15 @@ from packages.interfaces.tool_invocation import ToolInvocation
 from services.brain.tool_router import ToolRouter
 from services.brain.verification import (
     VerificationEngine,
+)
+from services.brain.verification import (
     verification_engine as default_verification_engine,
 )
-from services.logging.logger import logger
+from services.logging.logger import logger  # type: ignore[attr-defined]
 from services.security.pending_action_manager import (
     PendingActionManager,
+)
+from services.security.pending_action_manager import (
     pending_action_manager as default_pending_action_manager,
 )
 from services.security.safety_engine import SafetyEngine
@@ -89,9 +93,7 @@ class ExecutionEngine:
                     step.step_number,
                 )
 
-                results.append(
-                    f"Step {step.step_number} completed."
-                )
+                results.append(f"Step {step.step_number} completed.")
 
                 continue
 
@@ -101,8 +103,7 @@ class ExecutionEngine:
                 return ExecutionResult(
                     success=False,
                     error=(
-                        f"Tool '{tool_name}' required by step "
-                        f"{step.step_number} was not selected."
+                        f"Tool '{tool_name}' required by step {step.step_number} was not selected."
                     ),
                 )
 
@@ -138,10 +139,7 @@ class ExecutionEngine:
 
                 return ExecutionResult(
                     success=False,
-                    error=(
-                        f"Operation '{tool_name}' was blocked by "
-                        f"the security policy."
-                    ),
+                    error=(f"Operation '{tool_name}' was blocked by the security policy."),
                 )
 
             if safety_result.decision == PermissionDecision.CONFIRM:
@@ -160,10 +158,7 @@ class ExecutionEngine:
                     success=False,
                     requires_confirmation=True,
                     pending_action=action.to_dict(),
-                    error=(
-                        f"User confirmation is required before executing "
-                        f"'{tool_name}'."
-                    ),
+                    error=(f"User confirmation is required before executing '{tool_name}'."),
                 )
 
             try:
@@ -223,7 +218,7 @@ class ExecutionEngine:
         session_id: str | None = None,
     ) -> ConfirmationResult:
         """Execute a previously confirmed pending action through the security and tool pipeline.
-        
+
         Guarantees:
         1. Explicit reference to exact action_id (no heuristic guessing).
         2. Atomic single-use claiming (replay & race condition prevention).
@@ -243,6 +238,24 @@ class ExecutionEngine:
                 pending_action=action.to_dict() if action else None,
             )
 
+        # 0. Verify plugin active status if this is a plugin tool
+        if "." in action.tool_name:
+            plugin_id = action.tool_name.split(".", 1)[0]
+            from services.plugins import plugin_manager
+
+            if not plugin_manager.is_plugin_active(plugin_id):
+                self.pending_action_manager.mark_failed(
+                    action_id, f"Plugin '{plugin_id}' is not active or has been disabled."
+                )
+                return ConfirmationResult(
+                    success=False,
+                    status=ConfirmationStatus.FAILED,
+                    action_id=action_id,
+                    message=f"Cannot resume confirmed action: plugin '{plugin_id}' is not active.",
+                    error=f"Plugin '{plugin_id}' is not active.",
+                    pending_action=action.to_dict(),
+                )
+
         # 1. Re-validate ToolInvocation parameters
         try:
             invocation = ToolInvocation(
@@ -253,7 +266,9 @@ class ExecutionEngine:
             )
             is_valid, validation_err = invocation.validate()
             if not is_valid:
-                self.pending_action_manager.mark_failed(action_id, validation_err or "Invalid tool invocation")
+                self.pending_action_manager.mark_failed(
+                    action_id, validation_err or "Invalid tool invocation"
+                )
                 return ConfirmationResult(
                     success=False,
                     status=ConfirmationStatus.FAILED,
@@ -291,7 +306,9 @@ class ExecutionEngine:
             )
 
         if safety_result.decision == PermissionDecision.BLOCK:
-            self.pending_action_manager.mark_failed(action_id, "Operation blocked by security policy")
+            self.pending_action_manager.mark_failed(
+                action_id, "Operation blocked by security policy"
+            )
             return ConfirmationResult(
                 success=False,
                 status=ConfirmationStatus.FAILED,

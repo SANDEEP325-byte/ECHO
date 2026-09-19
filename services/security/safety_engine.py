@@ -17,9 +17,11 @@ class SafetyEngine:
         self,
         browser_policy: Any | None = None,
         desktop_policy: Any | None = None,
+        plugin_manager: Any | None = None,
     ) -> None:
         self.browser_policy = browser_policy
         self.desktop_policy = desktop_policy
+        self.plugin_manager = plugin_manager
 
     def evaluate(
         self,
@@ -35,6 +37,35 @@ class SafetyEngine:
             normalized,
             arguments is not None,
         )
+
+        # Specialized policy check for plugin tools
+        if "." in normalized:
+            from packages.common.tool_registry import tool_registry
+            from services.plugins import plugin_manager as default_plugin_manager
+            from services.plugins.security_policy import PluginSecurityPolicy
+
+            plugin_id, _ = normalized.split(".", 1)
+            p_mgr = self.plugin_manager or default_plugin_manager
+            plugin_record = p_mgr.get_plugin(plugin_id)
+
+            if plugin_record is not None:
+                if not p_mgr.is_plugin_active(plugin_id):
+                    return SafetyResult(
+                        operation=normalized,
+                        risk_level=RiskLevel.CRITICAL,
+                        decision=PermissionDecision.BLOCK,
+                        reason=f"Plugin '{plugin_id}' is not active or has been disabled.",
+                    )
+
+                tool = tool_registry.get(normalized)
+                tool_def = getattr(tool, "definition", None) if tool else None
+
+                return PluginSecurityPolicy.evaluate_plugin_call(
+                    manifest=plugin_record.manifest,
+                    tool_definition=tool_def,
+                    arguments=arguments,
+                    operation_name=normalized,
+                )
 
         risk_level = risk_classifier.classify(normalized, arguments=arguments)
 

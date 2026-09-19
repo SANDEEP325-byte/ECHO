@@ -15,7 +15,7 @@ class ResponseGenerator:
     Formats deterministic responses, tool outputs, execution confirmations, and fallbacks.
     """
 
-    def __init__(self, memory_manager=None) -> None:
+    def __init__(self, memory_manager: Any = None) -> None:
         self.memory_manager = memory_manager
 
     @staticmethod
@@ -25,7 +25,7 @@ class ResponseGenerator:
     def generate_fixed_response(
         self,
         intent: Intent | str,
-        memory_manager=None,
+        memory_manager: Any = None,
     ) -> str | None:
         """Generate deterministic responses for identity or greetings."""
         mgr = memory_manager or self.memory_manager
@@ -52,7 +52,7 @@ class ResponseGenerator:
     def generate_memory_save_response(
         self,
         user_message: str,
-        memory_manager=None,
+        memory_manager: Any = None,
     ) -> str | None:
         """Parse and store facts from user message, returning confirmation string."""
         mgr = memory_manager or self.memory_manager
@@ -128,7 +128,7 @@ class ResponseGenerator:
     def generate_memory_recall_response(
         self,
         user_message: str,
-        memory_manager=None,
+        memory_manager: Any = None,
     ) -> str:
         """Retrieve facts from memory and format a readable response."""
         mgr = memory_manager or self.memory_manager
@@ -209,7 +209,7 @@ class ResponseGenerator:
     def generate_memory_delete_response(
         self,
         user_message: str,
-        memory_manager=None,
+        memory_manager: Any = None,
     ) -> str:
         """Delete specific or all facts from memory and format a confirmation response."""
         mgr = memory_manager or self.memory_manager
@@ -297,6 +297,17 @@ class ResponseGenerator:
             return (
                 f"This action requires confirmation: execute {framework} tests on {targets_str} "
                 f"(timeout {timeout}s). Would you like to proceed? (yes/no)"
+            )
+
+        if "." in tool:
+            from services.plugins.security_policy import PluginSecurityPolicy
+
+            plugin_id, tool_name = tool.split(".", 1)
+            safe_args = PluginSecurityPolicy.redact_arguments(args) if args else {}
+            args_str = f" with arguments {safe_args}" if safe_args else ""
+            return (
+                f"This action requires confirmation from plugin '{plugin_id}': execute tool '{tool_name}'{args_str}. "
+                "Would you like to proceed? (yes/no)"
             )
 
         args_str = f" with arguments {args}" if args else ""

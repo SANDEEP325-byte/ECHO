@@ -1031,6 +1031,58 @@ class VerificationEngine:
                     observed=f"Upload completed ({file_size} bytes, navigation_occurred={meta.get('navigation_occurred', False)})",
                 )
 
+            elif "." in str(op) or "plugin_id" in meta:
+                # Independent verification of plugin operation
+                target_path_raw = meta.get("target_path") or meta.get("path")
+                if target_path_raw:
+                    is_safe, reason, target = self._validate_safe_path(
+                        target_path_raw, OperationType.READ
+                    )
+                    if not is_safe or target is None:
+                        return VerificationDetail(
+                            operation=str(op),
+                            status=VerificationStatus.VERIFICATION_ERROR,
+                            message=f"Plugin verification security violation: {reason}",
+                            expected="Target artifact resides within authorized sandbox",
+                            observed=f"Path safety violation: {reason}",
+                        )
+
+                    if not target.exists():
+                        return VerificationDetail(
+                            operation=str(op),
+                            status=VerificationStatus.NOT_VERIFIED,
+                            message=f"Plugin reported artifact '{target.name}', but it does not exist on disk.",
+                            expected=f"File exists at '{target}'",
+                            observed="File does not exist on disk (plugin claimed success without physical artifact)",
+                        )
+
+                    file_size = target.stat().st_size
+                    expected_min_size = meta.get("expected_min_size", 0)
+                    if file_size < expected_min_size:
+                        return VerificationDetail(
+                            operation=str(op),
+                            status=VerificationStatus.NOT_VERIFIED,
+                            message=f"Plugin artifact size {file_size} bytes is less than expected {expected_min_size} bytes.",
+                            expected=f"File size >= {expected_min_size} bytes",
+                            observed=f"File size is {file_size} bytes",
+                        )
+
+                    return VerificationDetail(
+                        operation=str(op),
+                        status=VerificationStatus.VERIFIED,
+                        message=f"Plugin artifact '{target.name}' independently verified on disk ({file_size} bytes).",
+                        expected=f"Artifact exists at '{target}'",
+                        observed=f"Verified artifact ({file_size} bytes)",
+                    )
+
+                return VerificationDetail(
+                    operation=str(op),
+                    status=VerificationStatus.NOT_APPLICABLE,
+                    message=f"Independent physical verification is not applicable for plugin operation '{op}'.",
+                    expected="N/A",
+                    observed="N/A",
+                )
+
             else:
                 return VerificationDetail(
                     operation=str(op),

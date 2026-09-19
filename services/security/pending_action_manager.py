@@ -254,6 +254,26 @@ class PendingActionManager:
                 pending_action=action.to_dict(),
             )
 
+    def cancel_actions_for_plugin(self, plugin_id: str) -> int:
+        """Cancel all active pending actions associated with a specific plugin.
+
+        Guarantees that disabling a plugin immediately prevents its pending actions
+        from executing.
+        """
+        prefix = f"{plugin_id}."
+        cancelled_count = 0
+        with self._lock:
+            for action in self._actions.values():
+                if action.tool_name.startswith(prefix) and action.state == ActionState.PENDING:
+                    action.state = ActionState.CANCELLED
+                    cancelled_count += 1
+                    logger.info(
+                        "Cancelled pending action {} for disabled plugin '{}'",
+                        action.action_id,
+                        plugin_id,
+                    )
+        return cancelled_count
+
     def _prune_if_needed(self) -> None:
         """Prune expired and completed actions if capacity threshold is exceeded."""
         now = time.time()

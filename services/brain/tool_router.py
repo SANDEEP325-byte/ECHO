@@ -4,18 +4,16 @@ from typing import Any
 from packages.common.tool_registry import tool_registry
 from packages.interfaces.tool_result import ToolResult
 from services.brain.tools import register_builtin_tools
-from services.logging.logger import logger
+from services.logging.logger import logger  # type: ignore[attr-defined]
 
 
 class ToolRouter:
     """Determines and executes tools for ECHO."""
-    
+
     def __init__(self) -> None:
         register_builtin_tools()
 
-    CALCULATION_PATTERN = re.compile(
-        r"^[\d\s\+\-\*\/\%\(\)\.\^]+$"
-    )
+    CALCULATION_PATTERN = re.compile(r"^[\d\s\+\-\*\/\%\(\)\.\^]+$")
 
     def extract_calculation(self, message: str) -> str | None:
         message = message.strip()
@@ -56,7 +54,7 @@ class ToolRouter:
 
         if tool_name == "calculator":
             return self.should_use_calculator(message)
-        
+
         if tool_name == "time":
             normalized = message.strip().lower()
 
@@ -79,10 +77,10 @@ class ToolRouter:
                 )
                 for pattern in time_patterns
             )
-            
+
         if tool_name == "date":
             normalized = message.strip().lower()
-            
+
             date_patterns = [
                 r"^what is today's date\??$",
                 r"^what's today's date\??$",
@@ -97,7 +95,7 @@ class ToolRouter:
                 r"^what's the current date\??$",
                 r"^whats the current date\??$",
             ]
-            
+
             return any(
                 re.fullmatch(
                     pattern,
@@ -133,7 +131,7 @@ class ToolRouter:
         )
 
         return result
-    
+
     def execute_for_intent(
         self,
         intent: str,
@@ -144,9 +142,7 @@ class ToolRouter:
         tool_name = self.get_tool_for_intent(intent)
 
         if tool_name is None:
-            raise ValueError(
-                f"No tool mapped to intent: {intent}"
-            )
+            raise ValueError(f"No tool mapped to intent: {intent}")
 
         if tool_name == "calculator":
             return self.execute_tool(
@@ -162,26 +158,28 @@ class ToolRouter:
         message: str | None = None,
         **kwargs: Any,
     ) -> Any:
-        """Generic tool execution entry point."""
+        # Check plugin active status if executing a plugin tool
+        is_plugin_tool = "." in tool_name
+        plugin_id = tool_name.split(".", 1)[0] if is_plugin_tool else None
+
+        if is_plugin_tool and plugin_id:
+            from services.plugins import plugin_manager
+
+            if not plugin_manager.is_plugin_active(plugin_id):
+                raise RuntimeError(f"Plugin '{plugin_id}' is not active or has been disabled.")
 
         tool = tool_registry.get(tool_name)
 
         if tool is None:
-            raise ValueError(
-                f"Unknown or unsupported tool: {tool_name}"
-            )
+            raise ValueError(f"Unknown or unsupported tool: {tool_name}")
 
-        if tool_name == "calculator":
-            if "expression" not in kwargs and message is not None:
-                expression = self.extract_calculation(message)
+        if tool_name == "calculator" and "expression" not in kwargs and message is not None:
+            expression = self.extract_calculation(message)
+            if expression is None:
+                raise ValueError("No valid calculation found.")
 
-                if expression is None:
-                    raise ValueError(
-                        "No valid calculation found."
-                    )
-
-                expression = expression.replace("^", "**")
-                kwargs["expression"] = expression
+            expression = expression.replace("^", "**")
+            kwargs["expression"] = expression
 
         try:
             result = tool_registry.execute(
@@ -194,28 +192,48 @@ class ToolRouter:
                 tool_name,
                 exc,
             )
-            raise RuntimeError(
-                f"Tool execution failed: {exc}"
-            ) from exc
+            if is_plugin_tool and plugin_id:
+                from services.plugins import plugin_manager
+
+                plugin_manager.record_failure(plugin_id, str(exc))
+            raise RuntimeError(f"Tool execution failed: {exc}") from exc
 
         if isinstance(result, ToolResult):
             if not result.success:
-                raise ValueError(
-                    result.error or f"Tool execution failed: {tool_name}"
-                )
+                if is_plugin_tool and plugin_id:
+                    from services.plugins import plugin_manager
+
+                    plugin_manager.record_failure(
+                        plugin_id, result.error or f"Tool '{tool_name}' returned failure"
+                    )
+                raise ValueError(result.error or f"Tool execution failed: {tool_name}")
+
+            if is_plugin_tool and plugin_id:
+                from services.plugins import plugin_manager
+                from services.plugins.security_policy import PluginSecurityPolicy
+
+                plugin_manager.record_success(plugin_id)
+                return PluginSecurityPolicy.sanitize_and_bound_output(result.result, plugin_id)
 
             return result.result
-    
+
+        if is_plugin_tool and plugin_id:
+            from services.plugins import plugin_manager
+            from services.plugins.security_policy import PluginSecurityPolicy
+
+            plugin_manager.record_success(plugin_id)
+            return PluginSecurityPolicy.sanitize_and_bound_output(result, plugin_id)
+
         return result
-        
+
     def get_available_tools(self) -> list[dict[str, Any]]:
         """Return definitions of all registered tools."""
 
         return tool_registry.get_definitions()
-    
+
     def is_tool_registered(self, tool_name: str) -> bool:
         return tool_registry.get(tool_name) is not None
-    
+
     def get_tool_for_intent(self, intent: str) -> str | None:
         """Return the tool name associated with an intent."""
 
@@ -226,5 +244,6 @@ class ToolRouter:
         }
 
         return intent_to_tool.get(intent)
+
 
 tool_router = ToolRouter()

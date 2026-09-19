@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from packages.common.capability_registry import (
+    Capability,
+    CapabilityRegistry,
+)
+from packages.common.capability_registry import (
+    capability_registry as default_capability_registry,
+)
 from packages.common.tool_registry import ToolRegistry
 from packages.common.tool_registry import tool_registry as default_tool_registry
 from packages.interfaces.plugin import Plugin, PluginManifest, PluginState
@@ -14,6 +21,12 @@ from packages.interfaces.tool_schema import ToolDefinition
 from services.logging.logger import logger  # type: ignore[attr-defined]
 from services.plugins.loader import PluginLoader, PluginLoadError
 from services.plugins.manifest import ManifestValidationError, PluginManifestValidator
+from services.security.pending_action_manager import (
+    PendingActionManager,
+)
+from services.security.pending_action_manager import (
+    pending_action_manager as default_pending_action_manager,
+)
 
 
 class NamespacedPluginTool(Tool):
@@ -51,6 +64,8 @@ class PluginRecord:
     plugin_instance: Plugin | None = None
     registered_tools: list[str] | None = None
     error: str | None = None
+    consecutive_failures: int = 0
+    max_consecutive_failures: int = 3
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +77,7 @@ class PluginRecord:
             "tools": list(self.manifest.tools),
             "registered_tools": self.registered_tools or [],
             "error": self.error,
+            "consecutive_failures": self.consecutive_failures,
         }
 
 
@@ -81,11 +97,17 @@ class PluginManager:
         plugins_dir: Path | str | None = None,
         enabled_plugins: set[str] | list[str] | None = None,
         tool_reg: ToolRegistry | None = None,
+        capability_reg: CapabilityRegistry | None = None,
+        pending_action_mgr: PendingActionManager | None = None,
         current_echo_version: str | None = None,
     ) -> None:
         self.plugins_dir = Path(plugins_dir or "plugins").resolve()
         self.enabled_plugins: set[str] = set(enabled_plugins or [])
         self.tool_registry: ToolRegistry = tool_reg or default_tool_registry
+        self.capability_registry: CapabilityRegistry = capability_reg or default_capability_registry
+        self.pending_action_manager: PendingActionManager = (
+            pending_action_mgr or default_pending_action_manager
+        )
         self.current_echo_version = current_echo_version
         self._plugins: dict[str, PluginRecord] = {}
 
@@ -190,13 +212,17 @@ class PluginManager:
         if not record:
             return False
 
-        # 1. Unregister all tools from canonical ToolRegistry
+        # 1. Unregister all tools from canonical ToolRegistry and CapabilityRegistry
         if record.registered_tools:
             for tool_name in record.registered_tools:
                 self.tool_registry.unregister(tool_name)
+                self.capability_registry.unregister(tool_name)
             record.registered_tools = []
 
-        # 2. Call shutdown on plugin instance
+        # 2. Invalidate any pending confirmation actions for this plugin
+        self.pending_action_manager.cancel_actions_for_plugin(plugin_id)
+
+        # 3. Call shutdown on plugin instance
         if record.plugin_instance:
             try:
                 record.plugin_instance.shutdown()
@@ -213,6 +239,7 @@ class PluginManager:
         Guarantees:
         - Plugin must be in enabled_plugins set.
         - Namespaces every tool as `<plugin_id>.<tool_name>`.
+        - Registers tools in ToolRegistry and CapabilityRegistry.
         - Catches all import/runtime exceptions to provide fault isolation.
         """
         record = self._plugins.get(plugin_id)
@@ -286,12 +313,19 @@ class PluginManager:
                     bare_name=bare_name,
                 )
                 self.tool_registry.register(wrapped_tool)
+                self.capability_registry.register(
+                    Capability(
+                        name=namespaced_name,
+                        description=wrapped_tool.description,
+                    )
+                )
                 registered_names.append(namespaced_name)
 
             record.plugin_instance = plugin_instance
             record.registered_tools = registered_names
             record.state = PluginState.ACTIVE
             record.error = None
+            record.consecutive_failures = 0
             logger.info(
                 "Plugin '{}' loaded successfully with {} tool(s): {}",
                 plugin_id,
@@ -309,6 +343,7 @@ class PluginManager:
             if record.registered_tools:
                 for tool_name in record.registered_tools:
                     self.tool_registry.unregister(tool_name)
+                    self.capability_registry.unregister(tool_name)
                 record.registered_tools = []
 
             return False
@@ -333,3 +368,57 @@ class PluginManager:
     def list_plugins(self) -> list[dict[str, Any]]:
         """Return serializable summary of all known plugins."""
         return [record.to_dict() for record in self._plugins.values()]
+
+    def record_failure(self, plugin_id: str, error: str) -> None:
+        """Record a failure for an active plugin and trigger circuit breaker if threshold reached."""
+        record = self._plugins.get(plugin_id)
+        if not record:
+            return
+
+        record.consecutive_failures += 1
+        logger.warning(
+            "Plugin '{}' recorded failure ({}/{}): {}",
+            plugin_id,
+            record.consecutive_failures,
+            record.max_consecutive_failures,
+            error,
+        )
+
+        if record.consecutive_failures >= record.max_consecutive_failures:
+            logger.error(
+                "Plugin '{}' exceeded failure threshold ({}); quarantining plugin.",
+                plugin_id,
+                record.max_consecutive_failures,
+            )
+            self.disable_plugin(plugin_id)
+            record.state = PluginState.ERROR
+            record.error = (
+                f"Quarantined: exceeded maximum consecutive failures "
+                f"({record.max_consecutive_failures}). Last error: {error}"
+            )
+
+    def record_success(self, plugin_id: str) -> None:
+        """Reset consecutive failure counter on successful plugin tool execution."""
+        record = self._plugins.get(plugin_id)
+        if record:
+            record.consecutive_failures = 0
+
+    def check_health(self, plugin_id: str) -> bool:
+        """Check the health of an active plugin."""
+        record = self._plugins.get(plugin_id)
+        if not record or record.state != PluginState.ACTIVE or not record.plugin_instance:
+            return False
+
+        try:
+            is_healthy = record.plugin_instance.health_check()
+            if not is_healthy:
+                self.record_failure(plugin_id, "Health check failed (returned False)")
+                return False
+            self.record_success(plugin_id)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            self.record_failure(plugin_id, f"Health check exception: {exc}")
+            return False
+
+
+plugin_manager = PluginManager()

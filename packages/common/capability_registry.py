@@ -17,6 +17,13 @@ class CapabilityRegistry:
     def register(self, capability: Capability) -> None:
         self._capabilities[capability.name] = capability
 
+    def unregister(self, name: str) -> bool:
+        """Unregister a capability by name. Returns True if removed, False otherwise."""
+        if name in self._capabilities:
+            del self._capabilities[name]
+            return True
+        return False
+
     def get(self, name: str) -> Capability | None:
         return self._capabilities.get(name)
 
@@ -29,11 +36,7 @@ class CapabilityRegistry:
         return capability.available
 
     def get_available(self) -> list[Capability]:
-        return [
-            capability
-            for capability in self._capabilities.values()
-            if capability.available
-        ]
+        return [capability for capability in self._capabilities.values() if capability.available]
 
     def get_all(self) -> list[Capability]:
         return list(self._capabilities.values())

@@ -1,15 +1,21 @@
 from typing import Any
 
-from packages.common.capability_registry import capability_registry
+from packages.common.capability_registry import (
+    CapabilityRegistry,
+    capability_registry,
+)
 from packages.interfaces.plan import Plan
 from packages.interfaces.request import Request
 from packages.interfaces.tool_invocation import ToolInvocation
 from services.brain.tool_router import tool_router
-from services.logging.logger import logger
+from services.logging.logger import logger  # type: ignore[attr-defined]
 
 
 class ToolSelector:
     """Unifies tool selection and builds validated ToolInvocation models."""
+
+    def __init__(self, capability_reg: CapabilityRegistry | None = None) -> None:
+        self.capability_registry: CapabilityRegistry = capability_reg or capability_registry
 
     def select(
         self,
@@ -30,7 +36,7 @@ class ToolSelector:
             if tool_name is None:
                 continue
 
-            if not capability_registry.is_available(tool_name):
+            if not self.capability_registry.is_available(tool_name):
                 logger.warning(
                     "Required capability unavailable for request {}: {}",
                     request.request_id,
@@ -70,7 +76,7 @@ class ToolSelector:
             if not step.tool_name:
                 continue
 
-            if not capability_registry.is_available(step.tool_name):
+            if not self.capability_registry.is_available(step.tool_name):
                 logger.warning(
                     "Capability '{}' required by step {} is not available in registry",
                     step.tool_name,
@@ -169,7 +175,6 @@ class ToolSelector:
                 return None
 
         return None
-
 
 
 tool_selector = ToolSelector()
