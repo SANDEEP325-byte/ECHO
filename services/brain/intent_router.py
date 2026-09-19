@@ -11,7 +11,9 @@ class Intent(str, Enum):
     MEMORY_SAVE = "memory_save"
     MEMORY_RECALL = "memory_recall"
     MEMORY_DELETE = "memory_delete"
+    CODING = "coding"
     GENERAL = "general"
+
     
 class IntentRouter:
     """Classifies simple user request before they reach the AI model."""
@@ -167,8 +169,15 @@ class IntentRouter:
         
         if tool_router.should_use_calculator(normalized):
             return Intent.CALCULATOR
-        
+
+        from services.coding.cognition import coding_cognition
+
+        is_coding, _, _ = coding_cognition.classify_coding_intent(normalized)
+        if is_coding:
+            return Intent.CODING
+
         return Intent.GENERAL
+
     
     @staticmethod
     def _normalize(message: str) -> str:

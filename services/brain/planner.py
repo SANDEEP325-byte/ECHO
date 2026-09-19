@@ -58,7 +58,11 @@ class Planner:
             return None
 
     @classmethod
-    def _deterministic_plan(cls, user_message: str) -> list[PlanStep]:
+    def _deterministic_plan(
+        cls,
+        user_message: str,
+        reasoning_decision: Any = None,
+    ) -> list[PlanStep]:
         """Provides a safe, deterministic plan for known tasks."""
         normalized = user_message.strip().lower()
 
@@ -92,6 +96,22 @@ class Planner:
                 ),
             ]
 
+        # Check for Coding Task Plan
+        from services.coding.cognition import coding_cognition
+
+        is_coding = False
+        sub_intent = None
+        if reasoning_decision is not None and getattr(reasoning_decision, "task_type", None) == "coding":
+            is_coding = True
+            sub_intent = getattr(reasoning_decision, "coding_sub_intent", None)
+        elif reasoning_decision is None or getattr(reasoning_decision, "task_type", None) != "multi_step":
+            is_coding, sub_intent, _ = coding_cognition.classify_coding_intent(user_message)
+
+        if is_coding:
+            coding_steps = coding_cognition.build_coding_plan(user_message, sub_intent=sub_intent)
+            if coding_steps:
+                return coding_steps
+
         return [
             PlanStep(
                 step_number=1,
@@ -110,6 +130,7 @@ class Planner:
         user_message: str,
         requires_planning: bool,
         ai_gateway: Any = None,
+        reasoning_decision: Any = None,
     ) -> Plan:
         """Asynchronously creates an execution plan, attempting structured model planning if available."""
         if not requires_planning:
@@ -136,20 +157,22 @@ class Planner:
             except Exception as exc:
                 logger.warning("Dynamic planning failed, falling back to deterministic plan: {}", exc)
 
-        return self.create_plan(user_message, requires_planning=True)
+        return self.create_plan(user_message, requires_planning=True, reasoning_decision=reasoning_decision)
 
     @classmethod
     def create_plan(
         cls,
         user_message: str,
         requires_planning: bool,
+        reasoning_decision: Any = None,
     ) -> Plan:
         """Synchronous plan creation using deterministic fallbacks."""
         if not requires_planning:
             return Plan(requires_planning=False, steps=[])
 
-        steps = cls._deterministic_plan(user_message)
+        steps = cls._deterministic_plan(user_message, reasoning_decision=reasoning_decision)
         return Plan(requires_planning=True, steps=steps)
+
 
 
 planner = Planner()

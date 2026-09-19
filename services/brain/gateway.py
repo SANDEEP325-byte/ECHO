@@ -31,12 +31,30 @@ class AIGateway:
         messages: list[Message],
         tool_result: str | None = None,
         tools: list[dict[str, Any]] | None = None,
+        code_context: str | None = None,
     ) -> str:
-        prompt = prompt_builder.build(
-            messages,
-            tool_result=tool_result,
-            tools=tools,
-        )
+        if code_context is not None:
+            try:
+                prompt = prompt_builder.build(
+                    messages,
+                    tool_result=tool_result,
+                    tools=tools,
+                    code_context=code_context,
+                )
+            except TypeError:
+                prompt = prompt_builder.build(
+                    messages,
+                    tool_result=tool_result,
+                    tools=tools,
+                )
+        else:
+            prompt = prompt_builder.build(
+                messages,
+                tool_result=tool_result,
+                tools=tools,
+            )
+
+
 
         if settings.ai_provider == "gemini":
             return await self._generate_gemini(prompt)

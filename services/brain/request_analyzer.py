@@ -72,7 +72,11 @@ class RequestAnalyzer:
             "develop",
             "implement",
             "debug",
+            "diagnose",
             "refactor",
+            "modify",
+            "patch",
+            "fix",
             "project",
         )
 
@@ -83,6 +87,7 @@ class RequestAnalyzer:
             return "complex"
 
         return "moderate"
+
 
 
 request_analyzer = RequestAnalyzer()

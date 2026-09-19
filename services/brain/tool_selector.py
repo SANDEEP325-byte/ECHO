@@ -146,7 +146,30 @@ class ToolSelector:
             except Exception:
                 return None
 
+        if name_lower in {"run_tests", "pytest"}:
+            try:
+                return ToolInvocation(
+                    tool_name="run_tests",
+                    arguments={"framework": "pytest"},
+                    purpose=purpose or "Run test suite",
+                    request_id=request_id,
+                )
+            except Exception:
+                return None
+
+        if name_lower in {"inspect_code_tree", "code_tree"}:
+            try:
+                return ToolInvocation(
+                    tool_name="inspect_code_tree",
+                    arguments={"max_depth": 3, "max_files": 100},
+                    purpose=purpose or "Inspect workspace code tree",
+                    request_id=request_id,
+                )
+            except Exception:
+                return None
+
         return None
+
 
 
 tool_selector = ToolSelector()

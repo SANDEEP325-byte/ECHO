@@ -49,6 +49,7 @@ class RiskClassifier:
         "browser_upload",
         "modify_code",
         "apply_patch",
+        "run_tests",
     }
 
     CRITICAL_OPERATIONS: ClassVar[set[str]] = {

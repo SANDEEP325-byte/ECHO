@@ -490,6 +490,81 @@ class VerificationEngine:
                     observed="Command executed successfully (exit code 0, bounded output)",
                 )
 
+            elif op == "run_tests":
+                # 1. Infrastructure, process error, or malformed state -> VERIFICATION_ERROR
+                if meta.get("status") == "error" or (
+                    meta.get("exit_code") is None and not meta.get("timed_out")
+                ):
+                    err_msg = meta.get("error") or meta.get("stderr") or "Process execution error"
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Test runner error: {err_msg}",
+                        expected="Test process executes and produces standard test results",
+                        observed=f"Execution error (exit code: {meta.get('exit_code')}, status: {meta.get('status')})",
+                    )
+
+                # Pytest internal or command usage errors (2=interrupted/usage, 3=internal error, 4=usage error)
+                if meta.get("exit_code") in (2, 3, 4):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Test runner framework/usage error (exit code {meta.get('exit_code')}).",
+                        expected="Valid test invocation without framework error",
+                        observed=f"Framework error (exit code: {meta.get('exit_code')})",
+                    )
+
+                # 2. Timeouts -> NOT_VERIFIED
+                if meta.get("timed_out"):
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="Test execution timed out.",
+                        expected="Tests complete within timeout limit",
+                        observed=f"Test runner timed out (status: {meta.get('status')})",
+                    )
+
+                # 3. No tests collected (exit code 5 in pytest) -> NOT_VERIFIED
+                if meta.get("status") == "no_tests_collected" or meta.get("exit_code") == 5:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message="No tests were collected or executed.",
+                        expected="At least one test collected and executed",
+                        observed="Zero tests collected (exit code 5)",
+                    )
+
+                # 4. Test failures -> NOT_VERIFIED
+                if (
+                    meta.get("exit_code") != 0
+                    or not meta.get("success")
+                    or meta.get("status") == "failed"
+                ):
+                    summary_obj = meta.get("summary")
+                    summary: dict[str, Any] = summary_obj if isinstance(summary_obj, dict) else {}
+                    failed_count = summary.get("failed", 0)
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Test suite failed with exit code {meta.get('exit_code')} ({failed_count} failure(s)).",
+                        expected="All executed tests pass with exit code 0",
+                        observed=f"Tests failed (exit code: {meta.get('exit_code')}, status: {meta.get('status')})",
+                    )
+
+                # 5. Successfully passed test run with exit code 0 -> VERIFIED
+                passed_summary_obj = meta.get("summary")
+                passed_summary: dict[str, Any] = (
+                    passed_summary_obj if isinstance(passed_summary_obj, dict) else {}
+                )
+                passed_count = passed_summary.get("passed", 0)
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"Test suite passed successfully (exit code 0, {passed_count} passed).",
+                    expected="All executed tests pass with exit code 0",
+                    observed=f"Tests passed successfully (exit code 0, {passed_count} passed)",
+                )
+
             elif op == "browser_open":
                 if not meta.get("success"):
                     return VerificationDetail(

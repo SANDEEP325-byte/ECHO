@@ -10,7 +10,7 @@ from services.memory.facts import fact_memory
 
 class ResponseGenerator:
     """Centralized response generator for ECHO Brain.
-    
+
     Adheres to ₹0 budget, security-first, and zero CoT/untrusted leakage principles.
     Formats deterministic responses, tool outputs, execution confirmations, and fallbacks.
     """
@@ -42,10 +42,7 @@ class ResponseGenerator:
                     f"Hello {preferred_name}! I'm ECHO, "
                     "your personal AI assistant. How can I help you today? 😊"
                 )
-            return (
-                "Hello! I'm ECHO, your personal AI assistant. "
-                "How can I help you today? 😊"
-            )
+            return "Hello! I'm ECHO, your personal AI assistant. How can I help you today? 😊"
 
         if intent_obj == Intent.IDENTITY:
             return "I'm ECHO, your personal AI assistant. 😌"
@@ -168,10 +165,7 @@ class ResponseGenerator:
                 return f"I'll call you {value}. 😉"
             return "You haven't told me what you'd like me to call you yet."
 
-        if (
-            "favorite color" in normalized
-            or "favourite color" in normalized
-        ):
+        if "favorite color" in normalized or "favourite color" in normalized:
             if mgr is not None:
                 value = mgr.get_fact("favorite_color")
             else:
@@ -242,20 +236,14 @@ class ResponseGenerator:
                 fact_memory.delete_fact("name")
             return "Okay, I've forgotten your name."
 
-        if (
-            "favorite color" in normalized
-            or "favourite color" in normalized
-        ):
+        if "favorite color" in normalized or "favourite color" in normalized:
             if mgr is not None:
                 mgr.delete_fact("favorite_color")
             else:
                 fact_memory.delete_fact("favorite_color")
             return "Okay, I've forgotten your favorite color."
 
-        if (
-            "call me" in normalized
-            or "preferred name" in normalized
-        ):
+        if "call me" in normalized or "preferred name" in normalized:
             if mgr is not None:
                 mgr.delete_fact("preferred_name")
             else:
@@ -293,6 +281,24 @@ class ResponseGenerator:
 
         tool = pending_action.get("tool", "unknown_operation")
         args = pending_action.get("arguments", {})
+
+        if tool == "run_tests":
+            framework = str(args.get("framework", "pytest"))
+            raw_targets = args.get("targets")
+            if isinstance(raw_targets, (list, tuple)):
+                targets_str = ", ".join(str(t) for t in raw_targets[:3])
+                if len(raw_targets) > 3:
+                    targets_str += f" and {len(raw_targets) - 3} more"
+            elif raw_targets:
+                targets_str = str(raw_targets)
+            else:
+                targets_str = "entire suite"
+            timeout = args.get("timeout", 30.0)
+            return (
+                f"This action requires confirmation: execute {framework} tests on {targets_str} "
+                f"(timeout {timeout}s). Would you like to proceed? (yes/no)"
+            )
+
         args_str = f" with arguments {args}" if args else ""
         return (
             f"This action requires confirmation: '{tool}'{args_str}. "

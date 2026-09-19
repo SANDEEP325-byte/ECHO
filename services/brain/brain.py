@@ -200,10 +200,18 @@ class ECHOBrain:
         )
 
         try:
-            plan = planner.create_plan(
-                request.user_input,
-                requires_planning=requires_planning,
-            )
+            try:
+                plan = planner.create_plan(
+                    request.user_input,
+                    requires_planning=requires_planning,
+                    reasoning_decision=reasoning_decision,
+                )
+            except TypeError:
+                plan = planner.create_plan(
+                    request.user_input,
+                    requires_planning=requires_planning,
+                )
+
         except Exception as exc:
             request.status = RequestStatus.FAILED
             request.error = str(exc)
@@ -420,11 +428,43 @@ class ECHOBrain:
                 )
             else:
                 try:
-                    response = await ai_gateway.generate(
-                        messages,
-                        tools=tool_router.get_available_tools(),
-                    )
+                    code_ctx_obj = request.context.get("coding_context")
+                    code_context_str = None
+                    if code_ctx_obj:
+                        if isinstance(code_ctx_obj, dict):
+                            from services.coding.cognition import CodeFileSlice, CodingContext, SearchHit
+
+                            ctx_instance = CodingContext(
+                                workspace_root=code_ctx_obj.get("workspace_root"),
+                                files=[CodeFileSlice(**f) for f in code_ctx_obj.get("files", [])],
+                                search_hits=[SearchHit(**h) for h in code_ctx_obj.get("search_hits", [])],
+                                test_summary=code_ctx_obj.get("test_summary"),
+                                truncated=code_ctx_obj.get("truncated", False),
+                                total_bytes=code_ctx_obj.get("total_bytes", 0),
+                            )
+                            code_context_str = ctx_instance.to_prompt_context()
+                        elif hasattr(code_ctx_obj, "to_prompt_context"):
+                            code_context_str = code_ctx_obj.to_prompt_context()
+
+                    if code_context_str is not None:
+                        try:
+                            response = await ai_gateway.generate(
+                                messages,
+                                tools=tool_router.get_available_tools(),
+                                code_context=code_context_str,
+                            )
+                        except TypeError:
+                            response = await ai_gateway.generate(
+                                messages,
+                                tools=tool_router.get_available_tools(),
+                            )
+                    else:
+                        response = await ai_gateway.generate(
+                            messages,
+                            tools=tool_router.get_available_tools(),
+                        )
                 except Exception as exc:
+
                     request.status = RequestStatus.FAILED
                     request.error = str(exc)
                     logger.error(
@@ -434,6 +474,14 @@ class ECHOBrain:
                     )
                     return response_generator.generate_fallback_response(str(exc))
 
+        # Ensure response is a string for storage and client consumption
+        if isinstance(response, list):
+            final_response = "\n".join(str(r) for r in response)
+        elif not isinstance(response, str):
+            final_response = str(response) if response is not None else ""
+        else:
+            final_response = response
+
         # Persist conversation turns
         if self.memory_manager is not None:
             self.memory_manager.save_message(
@@ -442,7 +490,7 @@ class ECHOBrain:
             )
             self.memory_manager.save_message(
                 role="assistant",
-                content=response,
+                content=final_response,
             )
         else:
             persistent_memory.save_message(
@@ -451,11 +499,12 @@ class ECHOBrain:
             )
             persistent_memory.save_message(
                 role="assistant",
-                content=response,
+                content=final_response,
             )
 
         logger.info("Brain completed request")
-        return response
+        return final_response
+
 
     def confirm_action(self, action_id: str, session_id: str | None = None) -> ConfirmationResult:
         """Confirm and resume an unexpired pending action through the execution pipeline."""

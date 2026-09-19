@@ -15,6 +15,7 @@ class TaskType(str, Enum):
     MEMORY = "memory"
     SINGLE_TOOL = "single_tool"
     MULTI_STEP = "multi_step"
+    CODING = "coding"
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,8 @@ class ReasoningDecision:
     requires_tool: bool = False
     selected_capabilities: list[str] = field(default_factory=list)
     needs_confirmation: bool = False
+    coding_sub_intent: str | None = None
+
 
 
 class ReasoningEngine:
@@ -139,22 +142,57 @@ class ReasoningEngine:
                 intent="date",
             )
 
-        # 4. Multi-Step Task / Complex Request
-        if (
-            complexity == "complex"
-            or any(
-                marker in normalized
-                for marker in (
-                    "step by step",
-                    "create and run",
-                    "build and run",
-                    "then run",
-                    "deploy it",
-                    "multiple steps",
-                    "install and start",
-                )
+        # 4. Explicit Multi-Step Workflow Orchestration
+        if any(
+            marker in normalized
+            for marker in (
+                "step by step",
+                "create and run",
+                "build and run",
+                "then run",
+                "deploy it",
+                "multiple steps",
+                "install and start",
             )
         ):
+            return ReasoningDecision(
+                task_type=TaskType.MULTI_STEP,
+                requires_planning=True,
+                tools_needed=["terminal"],
+                selected_capabilities=["terminal"],
+                requires_tool=True,
+                confidence=0.9,
+                intent="multi_step",
+            )
+
+        # 5. Coding Cognition Deliberation
+        from services.coding.cognition import CodingSubIntent, coding_cognition
+
+        is_coding, coding_sub_intent, coding_conf = coding_cognition.classify_coding_intent(
+            user_input, context=context
+        )
+        if is_coding:
+            coding_tools = coding_cognition.get_tools_for_sub_intent(coding_sub_intent)
+            requires_plan = coding_sub_intent in {
+                CodingSubIntent.EXPLORE,
+                CodingSubIntent.DIAGNOSE,
+                CodingSubIntent.PROPOSE,
+                CodingSubIntent.MODIFY,
+                CodingSubIntent.TEST,
+            }
+            return ReasoningDecision(
+                task_type=TaskType.CODING,
+                requires_planning=requires_plan,
+                tools_needed=coding_tools,
+                selected_capabilities=coding_tools,
+                requires_tool=bool(coding_tools),
+                confidence=coding_conf,
+                intent="coding",
+                coding_sub_intent=coding_sub_intent,
+            )
+
+        # 6. Fallback Complex Request
+        if complexity == "complex":
             return ReasoningDecision(
                 task_type=TaskType.MULTI_STEP,
                 requires_planning=True,

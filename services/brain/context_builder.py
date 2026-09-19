@@ -42,8 +42,16 @@ class ContextBuilder:
             recent_messages = memory.get_recent_messages(
                 limit=6
             )
-
             saved_facts = facts.get_all_facts()
+
+        coding_ctx = None
+        from services.coding.cognition import coding_cognition
+
+        if request.intent == "coding" or coding_cognition.classify_coding_intent(request.user_input)[0]:
+            try:
+                coding_ctx = coding_cognition.extract_coding_context(request)
+            except Exception as exc:
+                logger.warning("Failed to extract coding context: {}", exc)
 
         request.context = {
             "recent_messages": recent_messages,
@@ -51,7 +59,10 @@ class ContextBuilder:
             "semantic_memories": semantic_memories,
             "source": request.source,
             "session_id": request.session_id,
+            "coding_context": coding_ctx.to_dict() if coding_ctx else None,
         }
+
+
 
         logger.info(
             "Context built for request {}: {} messages, {} facts, {} semantic memories",
