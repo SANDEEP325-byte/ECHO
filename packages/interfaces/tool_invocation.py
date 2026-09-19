@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
 import re
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -16,10 +16,10 @@ class ToolInvocation:
     def __post_init__(self) -> None:
         if not self.tool_name or not self.tool_name.strip():
             raise ValueError("Tool name cannot be empty.")
-        if not re.fullmatch(r"[a-zA-Z0-9_\-]+", self.tool_name.strip()):
+        if not re.fullmatch(r"[a-zA-Z0-9_\-]+(?:\.[a-zA-Z0-9_\-]+)*", self.tool_name.strip()):
             raise ValueError("Invalid tool name format.")
         if not isinstance(self.arguments, dict):
-            raise ValueError("Arguments must be a dictionary.")
+            raise ValueError("Arguments must be a dictionary.")  # noqa: TRY004
 
         # Canonicalize tool name
         object.__setattr__(self, "tool_name", self.tool_name.strip().lower())
@@ -42,7 +42,10 @@ class ToolInvocation:
                 return False, "Calculator requires a non-empty string expression."
             # Whitelist valid math characters
             if not re.fullmatch(r"[\d\s\+\-\*\/\%\(\)\.\^\*]+", expr.strip()):
-                return False, f"Calculator expression contains unsafe or invalid characters: '{expr}'."
+                return (
+                    False,
+                    f"Calculator expression contains unsafe or invalid characters: '{expr}'.",
+                )
 
         if name in {
             "read_file",
@@ -77,11 +80,24 @@ class ToolInvocation:
             if not app_val:
                 return False, "Tool 'open_application' invocation requires 'application_name'."
             if not isinstance(app_val, str) or not app_val.strip():
-                return False, "Tool 'open_application' requires a non-empty string 'application_name'."
-            if any(c in app_val for c in ("/\\:*?\"<>|\x00")):
-                return False, f"Invalid application name '{app_val}': paths and special characters are prohibited."
-            if app_val.strip().lower().endswith((".exe", ".bat", ".cmd", ".ps1", ".vbs", ".sh", ".py", ".msi", ".com")):
-                return False, f"Executable/script extensions are prohibited in application name: '{app_val}'."
+                return (
+                    False,
+                    "Tool 'open_application' requires a non-empty string 'application_name'.",
+                )
+            if any(c in app_val for c in ('/\\:*?"<>|\x00')):
+                return (
+                    False,
+                    f"Invalid application name '{app_val}': paths and special characters are prohibited.",
+                )
+            if (
+                app_val.strip()
+                .lower()
+                .endswith((".exe", ".bat", ".cmd", ".ps1", ".vbs", ".sh", ".py", ".msi", ".com"))
+            ):
+                return (
+                    False,
+                    f"Executable/script extensions are prohibited in application name: '{app_val}'.",
+                )
 
         if name in {"execute_command", "run_command"}:
             cmd_val = self.arguments.get("command") or self.arguments.get("name")
@@ -89,18 +105,30 @@ class ToolInvocation:
                 return False, f"Tool '{name}' invocation requires 'command'."
             if not isinstance(cmd_val, str) or not cmd_val.strip():
                 return False, f"Tool '{name}' requires a non-empty string 'command'."
-            if any(c in cmd_val for c in ("/\\:*?\"<>|\x00&;`$")):
-                return False, f"Invalid command identifier '{cmd_val}': path separators and shell metacharacters are prohibited."
+            if any(c in cmd_val for c in ('/\\:*?"<>|\x00&;`$')):
+                return (
+                    False,
+                    f"Invalid command identifier '{cmd_val}': path separators and shell metacharacters are prohibited.",
+                )
             if "arguments" in self.arguments:
                 args_val = self.arguments.get("arguments")
                 if args_val is not None:
                     if not isinstance(args_val, (list, tuple)):
-                        return False, f"Tool '{name}' requires 'arguments' to be a list of strings, not a command string."
+                        return (
+                            False,
+                            f"Tool '{name}' requires 'arguments' to be a list of strings, not a command string.",
+                        )
                     for arg in args_val:
                         if not isinstance(arg, str):
-                            return False, f"Tool '{name}' argument must be a string, got {type(arg).__name__}."
+                            return (
+                                False,
+                                f"Tool '{name}' argument must be a string, got {type(arg).__name__}.",
+                            )
                         if any(c in arg for c in ("&", "|", ";", ">", "<", "`", "$", "\x00")):
-                            return False, f"Forbidden shell metacharacter detected in argument: '{arg}'."
+                            return (
+                                False,
+                                f"Forbidden shell metacharacter detected in argument: '{arg}'.",
+                            )
             if "cwd" in self.arguments:
                 cwd_val = self.arguments.get("cwd")
                 if cwd_val is not None and (not isinstance(cwd_val, str) or not cwd_val.strip()):

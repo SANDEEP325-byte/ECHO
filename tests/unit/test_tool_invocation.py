@@ -56,8 +56,12 @@ def test_calculator_expression_validation():
         ToolInvocation(tool_name="calculator", arguments={"expression": 123})  # type: ignore
 
     # Unsafe / malicious injection expression
-    with pytest.raises(ValueError, match="Calculator expression contains unsafe or invalid characters"):
-        ToolInvocation(tool_name="calculator", arguments={"expression": "__import__('os').system('ls')"})
+    with pytest.raises(
+        ValueError, match="Calculator expression contains unsafe or invalid characters"
+    ):
+        ToolInvocation(
+            tool_name="calculator", arguments={"expression": "__import__('os').system('ls')"}
+        )
 
 
 def test_tool_invocation_to_dict():
@@ -83,3 +87,44 @@ def test_tool_invocation_immutability():
     )
     with pytest.raises(AttributeError):
         inv.tool_name = "calculator"  # type: ignore
+
+
+def test_tool_invocation_namespaced_plugin_tools():
+    """Verify valid namespaced plugin tools (plugin_id.tool_name) are accepted and normalized."""
+    valid_names = [
+        "my_plugin.tool_name",
+        "system-diag.status_check",
+        "custom_tool.v1",
+        "org.vendor.plugin_tool",
+        "a.b",
+        "PLUGIN.TOOL",
+    ]
+    for name in valid_names:
+        inv = ToolInvocation(tool_name=name, arguments={})
+        assert inv.tool_name == name.strip().lower()
+
+
+def test_tool_invocation_rejects_malformed_namespaced_names():
+    """Verify malformed dot combinations, metacharacters, and arbitrary invalid tool names are rejected."""
+    invalid_names = [
+        ".leading_dot",
+        "trailing_dot.",
+        "consecutive..dots",
+        "...",
+        ".",
+        "has space.tool",
+        "tool;rm -rf",
+        "tool|pipe",
+        "tool/path",
+        "tool\\unc",
+        "tool$var",
+        "tool<redirect",
+        "tool>redirect",
+        "tool&bg",
+        "tool@name",
+        "tool#name",
+        "tool!name",
+    ]
+    for bad_name in invalid_names:
+        with pytest.raises(ValueError, match="Invalid tool name format"):
+            ToolInvocation(tool_name=bad_name, arguments={})

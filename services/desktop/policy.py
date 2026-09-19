@@ -1,10 +1,11 @@
+import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-import os
 from pathlib import Path
-from typing import Sequence
+from typing import ClassVar
 
-from services.logging.logger import logger
+from services.logging.logger import logger  # type: ignore[attr-defined]
 
 
 class OperationType(str, Enum):
@@ -66,7 +67,7 @@ class DesktopSecurityPolicy:
     """Centralized security policy and path sandbox validator for desktop operations."""
 
     # Explicit sensitive file names and key identifiers
-    SENSITIVE_FILE_NAMES = {
+    SENSITIVE_FILE_NAMES: ClassVar[set[str]] = {
         "credentials",
         "credentials.json",
         "secrets.json",
@@ -78,7 +79,7 @@ class DesktopSecurityPolicy:
     }
 
     # Sensitive path components (directories that must never be accessed)
-    SENSITIVE_DIR_NAMES = {
+    SENSITIVE_DIR_NAMES: ClassVar[set[str]] = {
         ".ssh",
         ".aws",
         ".git",
@@ -87,7 +88,7 @@ class DesktopSecurityPolicy:
     }
 
     # Sensitive private key extensions
-    SENSITIVE_EXTENSIONS = {
+    SENSITIVE_EXTENSIONS: ClassVar[set[str]] = {
         ".pem",
         ".key",
         ".pfx",
@@ -95,7 +96,7 @@ class DesktopSecurityPolicy:
     }
 
     # Blocked extensions when opening files (prevent code/script execution via association)
-    BLOCKED_OPEN_EXTENSIONS = {
+    BLOCKED_OPEN_EXTENSIONS: ClassVar[set[str]] = {
         ".exe",
         ".bat",
         ".cmd",
@@ -135,7 +136,7 @@ class DesktopSecurityPolicy:
                     resolved = Path(root).resolve()
                     if resolved not in self._roots:
                         self._roots.append(resolved)
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning("Could not resolve authorized root {}: {}", root, exc)
 
         if include_default_roots and authorized_roots is None:
@@ -151,7 +152,7 @@ class DesktopSecurityPolicy:
                     resolved = candidate.resolve()
                     if resolved not in self._roots:
                         self._roots.append(resolved)
-                except Exception as exc:
+                except (OSError, RuntimeError, ValueError) as exc:
                     logger.warning("Failed to resolve default root {}: {}", candidate, exc)
 
         # Build set of protected system locations
@@ -162,6 +163,24 @@ class DesktopSecurityPolicy:
         """Return the current active list of authorized root paths."""
         return list(self._roots)
 
+    def add_authorized_root(self, root: Path | str) -> None:
+        """Add an authorized root path to the policy."""
+        try:
+            resolved = Path(root).resolve()
+            if resolved not in self._roots:
+                self._roots.append(resolved)
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.warning("Could not add authorized root {}: {}", root, exc)
+
+    def remove_authorized_root(self, root: Path | str) -> None:
+        """Remove an authorized root path from the policy."""
+        try:
+            resolved = Path(root).resolve()
+            if resolved in self._roots:
+                self._roots.remove(resolved)
+        except (OSError, ValueError, RuntimeError):
+            pass
+
     def _build_protected_locations(self) -> list[Path]:
         """Collect standard Windows and system locations that are forbidden."""
         locations: list[Path] = []
@@ -170,7 +189,7 @@ class DesktopSecurityPolicy:
         try:
             locations.append(Path(system_root).resolve())
             locations.append((Path(system_root) / "System32").resolve())
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             pass
 
         for env_var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
@@ -178,7 +197,7 @@ class DesktopSecurityPolicy:
             if val:
                 try:
                     locations.append(Path(val).resolve())
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     pass
 
         return locations
@@ -209,7 +228,7 @@ class DesktopSecurityPolicy:
             )
 
         # Reject UNC / network paths
-        if path_str.startswith(r"\\") or path_str.startswith("//"):
+        if path_str.startswith((r"\\", "//")):
             raise SecurityPolicyError(
                 reason="Network and UNC paths are not permitted.",
                 error_code=PolicyErrorCode.UNC_PATH_REJECTED,
@@ -220,7 +239,7 @@ class DesktopSecurityPolicy:
         expanded_str = os.path.expanduser(expanded_str)
 
         # Re-check for UNC after expansion
-        if expanded_str.startswith(r"\\") or expanded_str.startswith("//"):
+        if expanded_str.startswith((r"\\", "//")):
             raise SecurityPolicyError(
                 reason="Network and UNC paths are not permitted.",
                 error_code=PolicyErrorCode.UNC_PATH_REJECTED,
@@ -245,7 +264,7 @@ class DesktopSecurityPolicy:
         if len(target_parts) < len(root_parts):
             return False
 
-        return target_parts[:len(root_parts)] == root_parts
+        return target_parts[: len(root_parts)] == root_parts
 
     def _is_protected_location(self, path: Path) -> bool:
         """Check whether path lies within a protected system directory or is a drive root."""
@@ -279,10 +298,7 @@ class DesktopSecurityPolicy:
             return True
 
         # Check sensitive file extensions
-        if path.suffix.lower() in self.SENSITIVE_EXTENSIONS:
-            return True
-
-        return False
+        return path.suffix.lower() in self.SENSITIVE_EXTENSIONS
 
     def validate(
         self,
@@ -303,7 +319,7 @@ class DesktopSecurityPolicy:
                 operation=operation,
                 target_path=str(raw_path),
             )
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             return PolicyCheckResult(
                 allowed=False,
                 reason=f"Invalid path: {exc}",
@@ -351,27 +367,30 @@ class DesktopSecurityPolicy:
             )
 
         # 4. Operation-Specific Checks
-        if operation == OperationType.OPEN:
-            if resolved_path.suffix.lower() in self.BLOCKED_OPEN_EXTENSIONS:
-                return PolicyCheckResult(
-                    allowed=False,
-                    reason="Opening executable, batch, or script files is strictly prohibited.",
-                    error_code=PolicyErrorCode.SENSITIVE_FILE,
-                    operation=operation,
-                    target_path=str(resolved_path),
-                )
+        if (
+            operation == OperationType.OPEN
+            and resolved_path.suffix.lower() in self.BLOCKED_OPEN_EXTENSIONS
+        ):
+            return PolicyCheckResult(
+                allowed=False,
+                reason="Opening executable, batch, or script files is strictly prohibited.",
+                error_code=PolicyErrorCode.SENSITIVE_FILE,
+                operation=operation,
+                target_path=str(resolved_path),
+            )
 
-        if operation in (OperationType.DELETE, OperationType.MOVE, OperationType.RENAME):
-            # Cannot delete, move, or rename the authorized root itself
-            if matched_root is not None:
-                if [p.lower() for p in resolved_path.parts] == [r.lower() for r in matched_root.parts]:
-                    return PolicyCheckResult(
-                        allowed=False,
-                        reason=f"Operating ({operation.value}) on an authorized sandbox root folder is forbidden.",
-                        error_code=PolicyErrorCode.ROOT_DELETION_FORBIDDEN,
-                        operation=operation,
-                        target_path=str(resolved_path),
-                    )
+        if (
+            operation in (OperationType.DELETE, OperationType.MOVE, OperationType.RENAME)
+            and matched_root is not None
+            and [p.lower() for p in resolved_path.parts] == [r.lower() for r in matched_root.parts]
+        ):
+            return PolicyCheckResult(
+                allowed=False,
+                reason=f"Operating ({operation.value}) on an authorized sandbox root folder is forbidden.",
+                error_code=PolicyErrorCode.ROOT_DELETION_FORBIDDEN,
+                operation=operation,
+                target_path=str(resolved_path),
+            )
 
         return PolicyCheckResult(
             allowed=True,
