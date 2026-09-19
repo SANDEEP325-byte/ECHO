@@ -145,9 +145,11 @@ class ModifyCodeTool(Tool):
             # 4. Preview only mode
             if preview_only:
                 return {
+                    "operation": "modify_code",
                     "success": True,
                     "preview_only": True,
                     "file_path": rel_path,
+                    "target_path": rel_path,
                     "diff": diff_preview,
                     "syntax_status": syntax_res.status,
                 }
@@ -159,36 +161,48 @@ class ModifyCodeTool(Tool):
             written_content = target.read_text(encoding="utf-8")
             if written_content != modified_content:
                 return {
+                    "operation": "modify_code",
+                    "target_path": rel_path,
                     "success": False,
                     "error": "File verification failed after atomic write: content mismatch.",
                     "diff": diff_preview,
                 }
 
             return {
+                "operation": "modify_code",
                 "success": True,
                 "file_path": rel_path,
+                "target_path": rel_path,
                 "diff": diff_preview,
                 "syntax_status": syntax_res.status,
             }
 
         except WorkspaceError as exc:
             return {
+                "operation": "modify_code",
+                "target_path": file_path,
                 "success": False,
                 "error": f"Workspace security violation: {exc.reason}",
             }
         except SyntaxValidationError as exc:
             return {
+                "operation": "modify_code",
+                "target_path": file_path,
                 "success": False,
                 "error": str(exc),
             }
         except FileNotFoundError:
             return {
+                "operation": "modify_code",
+                "target_path": file_path,
                 "success": False,
                 "error": f"File not found: '{file_path}'.",
             }
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to modify code in %s: %s", file_path, exc)
             return {
+                "operation": "modify_code",
+                "target_path": file_path,
                 "success": False,
                 "error": f"Modification failed: {exc}",
             }

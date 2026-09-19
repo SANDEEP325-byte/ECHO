@@ -143,6 +143,7 @@ class InspectCodeTreeTool(Tool):
 
             rel_target = target_dir.relative_to(workspace_root).as_posix()
             return {
+                "operation": "inspect_code_tree",
                 "success": True,
                 "workspace_root": str(workspace_root),
                 "target_path": rel_target if rel_target else ".",
@@ -153,12 +154,14 @@ class InspectCodeTreeTool(Tool):
 
         except WorkspaceError as exc:
             return {
+                "operation": "inspect_code_tree",
                 "success": False,
                 "error": f"Workspace security violation: {exc.reason}",
             }
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to inspect code tree for %s: %s", path, exc)
             return {
+                "operation": "inspect_code_tree",
                 "success": False,
                 "error": f"Failed to inspect directory tree: {exc}",
             }

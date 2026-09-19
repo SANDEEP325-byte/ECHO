@@ -276,6 +276,7 @@ class CodingCognition:
         if any(
             marker in normalized
             for marker in (
+                "explain this code",
                 "explain this function",
                 "explain this class",
                 "explain this file",

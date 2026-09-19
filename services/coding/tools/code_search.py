@@ -189,6 +189,7 @@ class SearchCodeTool(Tool):
                     continue
 
             return {
+                "operation": "search_code",
                 "success": True,
                 "query": query,
                 "is_regex": is_regex,
@@ -199,12 +200,14 @@ class SearchCodeTool(Tool):
 
         except WorkspaceError as exc:
             return {
+                "operation": "search_code",
                 "success": False,
                 "error": f"Workspace security violation: {exc.reason}",
             }
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to search code for %s: %s", query, exc)
             return {
+                "operation": "search_code",
                 "success": False,
                 "error": f"Search failed: {exc}",
             }

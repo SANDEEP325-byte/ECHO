@@ -565,6 +565,113 @@ class VerificationEngine:
                     observed=f"Tests passed successfully (exit code 0, {passed_count} passed)",
                 )
 
+            elif op in ("modify_code", "apply_patch"):
+                # 1. Operation reports failure
+                if not meta.get("success"):
+                    err_msg = meta.get("error") or "Operation was unsuccessful"
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: {op} reported failure: {err_msg}",
+                        expected=f"Successful execution of {op}",
+                        observed=f"Failure: {err_msg}",
+                    )
+
+                # 2. Extract and validate target path
+                raw_path = meta.get("target_path") or meta.get("file_path")
+                if not raw_path:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification error: {op} metadata missing target path.",
+                        expected="Valid target file path",
+                        observed="Missing target path in metadata",
+                    )
+
+                from services.coding.workspace import WorkspaceError, workspace_manager
+
+                try:
+                    target = workspace_manager.validate_path(
+                        raw_path, must_exist=True, allow_sensitive=False
+                    )
+                except WorkspaceError as exc:
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFICATION_ERROR,
+                        message=f"Verification security error: target '{raw_path}' violates workspace policy: {exc.reason}",
+                        expected="Target resides within authorized workspace",
+                        observed=f"Workspace violation: {exc.reason}",
+                    )
+
+                # 3. Target exists and is a regular file
+                if not target.is_file():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: target '{target.name}' is not a regular file.",
+                        expected="Target is a regular file",
+                        observed="Target exists but is not a regular file",
+                    )
+
+                # 4. Preview-only mode verification
+                if meta.get("preview_only"):
+                    diff_val = meta.get("diff")
+                    if not diff_val or not isinstance(diff_val, str) or not diff_val.strip():
+                        return VerificationDetail(
+                            operation=op,
+                            status=VerificationStatus.NOT_VERIFIED,
+                            message=f"Verification failed: {op} preview produced empty diff evidence.",
+                            expected="Non-empty unified diff preview",
+                            observed="Missing diff preview",
+                        )
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.VERIFIED,
+                        message=f"{op} preview on '{target.name}' verified without disk mutation.",
+                        expected="Preview diff generated without disk mutation",
+                        observed="Preview generated successfully",
+                    )
+
+                # 5. Non-empty diff evidence for file modifications
+                diff_val = meta.get("diff")
+                if not diff_val or not isinstance(diff_val, str) or not diff_val.strip():
+                    return VerificationDetail(
+                        operation=op,
+                        status=VerificationStatus.NOT_VERIFIED,
+                        message=f"Verification failed: {op} produced empty or missing diff evidence.",
+                        expected="Non-empty unified diff evidence",
+                        observed="Empty or missing diff",
+                    )
+
+                # 6. Syntax validation for Python files
+                if target.suffix.lower() == ".py":
+                    syntax_status = str(meta.get("syntax_status") or "").upper()
+                    if syntax_status not in ("VALID", "NOT_APPLICABLE", "SKIPPED"):
+                        return VerificationDetail(
+                            operation=op,
+                            status=VerificationStatus.VERIFICATION_ERROR,
+                            message=f"Verification error: Python AST syntax check was '{meta.get('syntax_status')}'.",
+                            expected="Valid Python syntax",
+                            observed=f"Syntax status: {meta.get('syntax_status')}",
+                        )
+
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.VERIFIED,
+                    message=f"{op} on '{target.name}' verified successfully.",
+                    expected="File exists within workspace with valid syntax and diff evidence",
+                    observed="Observable file state verified on disk",
+                )
+
+            elif op in ("read_code", "search_code", "inspect_code_tree"):
+                return VerificationDetail(
+                    operation=op,
+                    status=VerificationStatus.NOT_APPLICABLE,
+                    message=f"Verification is not applicable for read-only coding operation '{op}'.",
+                    expected="N/A",
+                    observed="Read-only operation completed without state mutation",
+                )
+
             elif op == "browser_open":
                 if not meta.get("success"):
                     return VerificationDetail(

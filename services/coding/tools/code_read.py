@@ -137,6 +137,7 @@ class ReadCodeTool(Tool):
             content = "".join(lines)
 
             return {
+                "operation": "read_code",
                 "success": True,
                 "file_path": rel_path,
                 "start_line": start,
@@ -151,17 +152,20 @@ class ReadCodeTool(Tool):
 
         except WorkspaceError as exc:
             return {
+                "operation": "read_code",
                 "success": False,
                 "error": f"Workspace security violation: {exc.reason}",
             }
         except FileNotFoundError:
             return {
+                "operation": "read_code",
                 "success": False,
                 "error": f"File not found: '{file_path}'.",
             }
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to read code from %s: %s", file_path, exc)
             return {
+                "operation": "read_code",
                 "success": False,
                 "error": f"Read failed: {exc}",
             }

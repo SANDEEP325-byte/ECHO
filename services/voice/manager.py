@@ -462,11 +462,18 @@ class VoiceManager:
 
         if intent == ConfirmationIntent.CONFIRM:
             # Reuses ECHOBrain.confirm_action -> ExecutionEngine.resume_pending_action
+            action = self.brain.get_pending_action(pending_action_id)
+            tool_name = action.tool_name if action else ""
             confirm_res = self.brain.confirm_action(pending_action_id, session_id=session_id)
-            if confirm_res.success:
-                msg = f"Action confirmed and executed successfully: {confirm_res.result}"
-            else:
-                msg = f"Action execution failed: {confirm_res.message}"
+            if not tool_name and confirm_res.pending_action:
+                tool_name = confirm_res.pending_action.get("tool_name", "")
+
+            msg = VoiceConfirmationValidator.format_safe_vocal_result(
+                tool_name=tool_name,
+                result=confirm_res.result,
+                success=confirm_res.success,
+                error_message=confirm_res.message,
+            )
             if speak_outcome:
                 await self.speak(msg, session_id=session_id)
             return intent, confirm_res, msg
