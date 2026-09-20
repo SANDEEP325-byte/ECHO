@@ -96,6 +96,10 @@ class RiskClassifier:
 
         # 1. Payload inspection for dangerous terms
         if arguments:
+
+            def _get_arg_values(key_name: str) -> list[Any]:
+                return [v for k, v in arguments.items() if str(k).lower() == key_name]
+
             payload_str = " ".join(str(v).lower() for v in arguments.values())
             if any(pattern in payload_str for pattern in cls.DANGEROUS_PATTERNS):
                 return RiskLevel.CRITICAL
@@ -104,9 +108,9 @@ class RiskClassifier:
 
             # Specific browser interaction classification
             if normalized == "browser_click":
-                if arguments.get("is_submit") is True:
+                if any(v is True for v in _get_arg_values("is_submit")):
                     return RiskLevel.SENSITIVE
-                selector = str(arguments.get("selector", "")).lower()
+                selectors = [str(v).lower() for v in _get_arg_values("selector")]
                 browser_sensitive_click_keywords = (
                     "submit",
                     "buy",
@@ -123,13 +127,15 @@ class RiskClassifier:
                     "create",
                     "account",
                 )
-                if any(k in selector for k in browser_sensitive_click_keywords):
+                if any(k in sel for sel in selectors for k in browser_sensitive_click_keywords):
                     return RiskLevel.SENSITIVE
 
             if normalized == "browser_type":
-                if arguments.get("is_sensitive") is True or arguments.get("submit") is True:
+                if any(v is True for v in _get_arg_values("is_sensitive")) or any(
+                    v is True for v in _get_arg_values("submit")
+                ):
                     return RiskLevel.SENSITIVE
-                selector = str(arguments.get("selector", "")).lower()
+                selectors = [str(v).lower() for v in _get_arg_values("selector")]
                 sensitive_field_keywords = (
                     "password",
                     "pass",
@@ -144,11 +150,11 @@ class RiskClassifier:
                     "cvv",
                     "auth",
                 )
-                if any(k in selector for k in sensitive_field_keywords):
+                if any(k in sel for sel in selectors for k in sensitive_field_keywords):
                     return RiskLevel.SENSITIVE
 
             if normalized == "browser_download":
-                dest = str(arguments.get("destination_path", "")).lower()
+                dest_vals = [str(v).lower() for v in _get_arg_values("destination_path")]
                 dangerous_exts = (
                     ".exe",
                     ".bat",
@@ -161,12 +167,16 @@ class RiskClassifier:
                     ".sys",
                     ".scr",
                 )
-                if any(dest.endswith(ext) for ext in dangerous_exts) or dest.startswith(r"\\"):
+                if any(
+                    any(dest.endswith(ext) for ext in dangerous_exts) or dest.startswith(r"\\")
+                    for dest in dest_vals
+                ):
                     return RiskLevel.CRITICAL
-                return RiskLevel.SENSITIVE
+                if dest_vals:
+                    return RiskLevel.SENSITIVE
 
             if normalized == "browser_upload":
-                src = str(arguments.get("file_path", "")).lower()
+                src_vals = [str(v).lower() for v in _get_arg_values("file_path")]
                 sensitive_targets = (
                     "id_rsa",
                     "id_ed25519",
@@ -177,9 +187,13 @@ class RiskClassifier:
                     ".ssh",
                     ".aws",
                 )
-                if any(t in src for t in sensitive_targets) or src.startswith(r"\\"):
+                if any(
+                    any(t in src for t in sensitive_targets) or src.startswith(r"\\")
+                    for src in src_vals
+                ):
                     return RiskLevel.CRITICAL
-                return RiskLevel.SENSITIVE
+                if src_vals:
+                    return RiskLevel.SENSITIVE
 
         # 2. Base operation classification
         if normalized in cls.SAFE_OPERATIONS:

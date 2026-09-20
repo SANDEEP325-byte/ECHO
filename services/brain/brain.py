@@ -482,25 +482,28 @@ class ECHOBrain:
         else:
             final_response = response
 
-        # Persist conversation turns
-        if self.memory_manager is not None:
-            self.memory_manager.save_message(
-                role="user",
-                content=msg_text,
-            )
-            self.memory_manager.save_message(
-                role="assistant",
-                content=final_response,
-            )
-        else:
-            persistent_memory.save_message(
-                role="user",
-                content=msg_text,
-            )
-            persistent_memory.save_message(
-                role="assistant",
-                content=final_response,
-            )
+        # Persist conversation turns defensively
+        try:
+            if self.memory_manager is not None:
+                self.memory_manager.save_message(
+                    role="user",
+                    content=msg_text,
+                )
+                self.memory_manager.save_message(
+                    role="assistant",
+                    content=final_response,
+                )
+            else:
+                persistent_memory.save_message(
+                    role="user",
+                    content=msg_text,
+                )
+                persistent_memory.save_message(
+                    role="assistant",
+                    content=final_response,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to persist conversation turn to memory: {}", exc)
 
         logger.info("Brain completed request")
         return final_response

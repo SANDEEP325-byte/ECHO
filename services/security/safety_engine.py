@@ -67,29 +67,37 @@ class SafetyEngine:
                     operation_name=normalized,
                 )
 
+        def _get_arg_values(key_name: str) -> list[Any]:
+            if not arguments:
+                return []
+            return [v for k, v in arguments.items() if str(k).lower() == key_name]
+
         risk_level = risk_classifier.classify(normalized, arguments=arguments)
 
         decision = permission_manager.decide(risk_level)
 
         # Specialized policy check for browser navigation targets
-        if normalized == "browser_navigate" and arguments and "url" in arguments:
-            from services.browser.policy import browser_security_policy
+        if normalized == "browser_navigate":
+            urls = _get_arg_values("url")
+            for raw_url in urls:
+                from services.browser.policy import browser_security_policy
 
-            b_policy = self.browser_policy or browser_security_policy
-            url_check = b_policy.validate_url(str(arguments["url"]))
-            if not url_check.allowed:
-                if url_check.decision == PermissionDecision.CONFIRM:
-                    decision = PermissionDecision.CONFIRM
-                    risk_level = RiskLevel.SENSITIVE
+                b_policy = self.browser_policy or browser_security_policy
+                url_check = b_policy.validate_url(str(raw_url))
+                if not url_check.allowed:
+                    if url_check.decision == PermissionDecision.CONFIRM:
+                        decision = PermissionDecision.CONFIRM
+                        risk_level = RiskLevel.SENSITIVE
+                        reason = url_check.reason
+                    else:
+                        decision = PermissionDecision.BLOCK
+                        risk_level = RiskLevel.CRITICAL
+                        reason = url_check.reason
+                        break
+                elif decision != PermissionDecision.CONFIRM:
+                    decision = PermissionDecision.ALLOW
+                    risk_level = RiskLevel.SAFE
                     reason = url_check.reason
-                else:
-                    decision = PermissionDecision.BLOCK
-                    risk_level = RiskLevel.CRITICAL
-                    reason = url_check.reason
-            else:
-                decision = PermissionDecision.ALLOW
-                risk_level = RiskLevel.SAFE
-                reason = url_check.reason
 
         elif normalized == "browser_download":
             from pathlib import Path
@@ -101,64 +109,66 @@ class SafetyEngine:
             b_policy = self.browser_policy or browser_security_policy
             d_policy = self.desktop_policy or desktop_security_policy
 
-            # If URL is provided, validate URL safety
-            if arguments and "url" in arguments and arguments["url"]:
-                url_check = b_policy.validate_url(str(arguments["url"]))
-                if not url_check.allowed:
-                    decision = PermissionDecision.BLOCK
-                    risk_level = RiskLevel.CRITICAL
-                    reason = f"Download URL violates security policy: {url_check.reason}"
-                else:
-                    decision = PermissionDecision.CONFIRM
-                    risk_level = RiskLevel.SENSITIVE
-                    reason = (
-                        "User confirmation is required before downloading files from the browser."
-                    )
+            urls = _get_arg_values("url")
+            if urls:
+                for raw_url in urls:
+                    url_check = b_policy.validate_url(str(raw_url))
+                    if not url_check.allowed:
+                        decision = PermissionDecision.BLOCK
+                        risk_level = RiskLevel.CRITICAL
+                        reason = f"Download URL violates security policy: {url_check.reason}"
+                        break
+                    else:
+                        decision = PermissionDecision.CONFIRM
+                        risk_level = RiskLevel.SENSITIVE
+                        reason = "User confirmation is required before downloading files from the browser."
             else:
                 decision = PermissionDecision.CONFIRM
                 risk_level = RiskLevel.SENSITIVE
                 reason = "User confirmation is required before downloading files from the browser."
 
             # If destination_path is provided, validate through DesktopSecurityPolicy
-            if (
-                decision != PermissionDecision.BLOCK
-                and arguments
-                and "destination_path" in arguments
-                and arguments["destination_path"]
-            ):
-                dest_str = str(arguments["destination_path"])
-                dest_check = d_policy.validate(dest_str, OperationType.CREATE)
-                if not dest_check.allowed:
-                    decision = PermissionDecision.BLOCK
-                    risk_level = RiskLevel.CRITICAL
-                    reason = f"Download destination violates security policy: {dest_check.reason}"
-                else:
-                    ext = Path(dest_str).suffix.lower()
-                    if ext in BrowserOperations.BLOCKED_DOWNLOAD_EXTENSIONS:
+            if decision != PermissionDecision.BLOCK:
+                dest_paths = _get_arg_values("destination_path")
+                for raw_dest in dest_paths:
+                    dest_str = str(raw_dest)
+                    dest_check = d_policy.validate(dest_str, OperationType.CREATE)
+                    if not dest_check.allowed:
                         decision = PermissionDecision.BLOCK
                         risk_level = RiskLevel.CRITICAL
                         reason = (
-                            f"Download of executable file with extension '{ext}' is prohibited."
+                            f"Download destination violates security policy: {dest_check.reason}"
                         )
+                        break
+                    else:
+                        ext = Path(dest_str).suffix.lower()
+                        if ext in BrowserOperations.BLOCKED_DOWNLOAD_EXTENSIONS:
+                            decision = PermissionDecision.BLOCK
+                            risk_level = RiskLevel.CRITICAL
+                            reason = (
+                                f"Download of executable file with extension '{ext}' is prohibited."
+                            )
+                            break
 
         elif normalized == "browser_upload":
             from services.desktop.policy import OperationType, desktop_security_policy
 
             d_policy = self.desktop_policy or desktop_security_policy
 
-            if arguments and "file_path" in arguments and arguments["file_path"]:
-                src_str = str(arguments["file_path"])
-                src_check = d_policy.validate(src_str, OperationType.READ)
-                if not src_check.allowed:
-                    decision = PermissionDecision.BLOCK
-                    risk_level = RiskLevel.CRITICAL
-                    reason = f"Upload source path violates security policy: {src_check.reason}"
-                else:
-                    decision = PermissionDecision.CONFIRM
-                    risk_level = RiskLevel.SENSITIVE
-                    reason = (
-                        "User confirmation is required before uploading local files to the browser."
-                    )
+            file_paths = _get_arg_values("file_path")
+            if file_paths:
+                for raw_file in file_paths:
+                    src_str = str(raw_file)
+                    src_check = d_policy.validate(src_str, OperationType.READ)
+                    if not src_check.allowed:
+                        decision = PermissionDecision.BLOCK
+                        risk_level = RiskLevel.CRITICAL
+                        reason = f"Upload source path violates security policy: {src_check.reason}"
+                        break
+                    else:
+                        decision = PermissionDecision.CONFIRM
+                        risk_level = RiskLevel.SENSITIVE
+                        reason = "User confirmation is required before uploading local files to the browser."
             else:
                 decision = PermissionDecision.CONFIRM
                 risk_level = RiskLevel.SENSITIVE
