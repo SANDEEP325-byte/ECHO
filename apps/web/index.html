@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ECHO — Jarvis Command Center</title>
+  <meta name="description" content="ECHO Personal AI Operating System — Futuristic Voice-First Command Center and Holographic Avatar HUD.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/hud/css/hud.css">
+  <link rel="stylesheet" href="/hud/css/avatar.css">
+</head>
+<body>
+  <div class="hud-scanlines" aria-hidden="true"></div>
+  <div class="hud-vignette" aria-hidden="true"></div>
+
+  <div class="hud-container">
+    <!-- Top Telemetry Header -->
+    <header class="hud-header" role="banner">
+      <div class="hud-brand">
+        <div class="hud-logo-glyph" aria-hidden="true"></div>
+        <div class="hud-brand-text">
+          <h1 class="hud-title">ECHO <span class="hud-subtitle">// COMMAND CENTER</span></h1>
+          <span class="hud-version">AI OS v0.1.0 &bull; LOCAL INSTANCE</span>
+        </div>
+      </div>
+
+      <div class="hud-telemetry" aria-label="System Telemetry">
+        <div class="telemetry-pill">
+          <span class="telemetry-label">GATEWAY:</span>
+          <span id="gateway-status" class="telemetry-value status-offline" role="status">DISCONNECTED</span>
+        </div>
+        <div class="telemetry-pill">
+          <span class="telemetry-label">SESSION:</span>
+          <span id="session-id-display" class="telemetry-value">---</span>
+        </div>
+        <button id="btn-mute-toggle" class="telemetry-pill btn-telemetry-toggle" type="button" aria-label="Toggle voice output mute">
+          <span class="telemetry-label">VOICE:</span>
+          <span id="mute-status-label" class="telemetry-value status-active">UNMUTED</span>
+        </button>
+        <div class="telemetry-pill">
+          <span class="telemetry-label">SECURITY:</span>
+          <span class="telemetry-value status-active">ENFORCING</span>
+        </div>
+        <div class="telemetry-pill">
+          <span class="telemetry-label">TIME (UTC):</span>
+          <span id="clock-display" class="telemetry-value">00:00:00</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Command Deck -->
+    <main class="hud-main" role="main">
+      <!-- Left Diagnostics Column -->
+      <aside class="hud-sidebar hud-panel" aria-label="Subsystems Diagnostics">
+        <div class="panel-header">
+          <span class="panel-icon" aria-hidden="true">&diams;</span>
+          <h2 class="panel-title">SUBSYSTEMS</h2>
+          <span class="panel-tag">LIVE</span>
+        </div>
+
+        <div class="panel-content">
+          <div class="subsystem-list">
+            <div class="subsystem-item">
+              <span class="subsystem-name">COGNITIVE BRAIN</span>
+              <span class="subsystem-indicator indicator-active">ACTIVE</span>
+            </div>
+            <div class="subsystem-item">
+              <span class="subsystem-name">SAFETY ENGINE</span>
+              <span class="subsystem-indicator indicator-active">ARMED</span>
+            </div>
+            <div class="subsystem-item">
+              <span class="subsystem-name">EXECUTION PIPELINE</span>
+              <span class="subsystem-indicator indicator-active">READY</span>
+            </div>
+            <div class="subsystem-item">
+              <span class="subsystem-name">PERSISTENT MEMORY</span>
+              <span class="subsystem-indicator indicator-active">SYNCED</span>
+            </div>
+            <div class="subsystem-item">
+              <span class="subsystem-name">AVATAR CORE</span>
+              <span id="subsystem-avatar-indicator" class="subsystem-indicator indicator-active">IDLE</span>
+            </div>
+          </div>
+
+          <div class="hud-divider"></div>
+
+          <div class="quick-commands-section">
+            <div class="section-label">VOICE PROMPTS</div>
+            <div class="command-chips">
+              <button type="button" class="chip-btn" data-prompt="Status report">"Status report"</button>
+              <button type="button" class="chip-btn" data-prompt="What time is it?">"What time is it?"</button>
+              <button type="button" class="chip-btn" data-prompt="Calculate 128 multiplied by 32">"Calculate 128 * 32"</button>
+              <button type="button" class="chip-btn" data-prompt="List system tools">"List system tools"</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center Stage: Holographic Avatar Core -->
+      <section class="hud-center" aria-label="Avatar Holographic Core">
+        <div class="avatar-stage">
+          <!-- Holographic Arc / Visualizer Reticle -->
+          <div class="avatar-reticle" aria-hidden="true">
+            <div class="reticle-ring ring-outer"></div>
+            <div class="reticle-ring ring-middle"></div>
+            <div class="reticle-ring ring-inner"></div>
+            <div class="reticle-ticks"></div>
+          </div>
+
+          <!-- Dynamic Canvas Reactor Core -->
+          <div class="avatar-core-wrapper">
+            <canvas id="avatar-canvas" width="440" height="440" aria-label="Holographic Avatar Visualization"></canvas>
+            <div class="avatar-glow-overlay" aria-hidden="true"></div>
+          </div>
+
+          <!-- State & Audio Reactivity HUD -->
+          <div class="avatar-state-banner">
+            <span class="state-prefix">CORE STATE //</span>
+            <span id="avatar-state-label" class="state-badge badge-idle" aria-live="polite">IDLE</span>
+          </div>
+
+          <!-- Voice-First Push-to-Talk / Interaction Control -->
+          <div class="voice-control-deck">
+            <button id="btn-voice-toggle" class="voice-ptt-button" type="button" aria-label="Push to Talk or activate voice listening">
+              <div class="mic-wave-bars" aria-hidden="true">
+                <span class="bar bar-1"></span>
+                <span class="bar bar-2"></span>
+                <span class="bar bar-3"></span>
+                <span class="bar bar-4"></span>
+                <span class="bar bar-5"></span>
+              </div>
+              <span id="voice-button-label" class="voice-button-text">VOICE ACTIVATION</span>
+            </button>
+            <p id="voice-guidance" class="voice-guidance-text" aria-live="polite">Voice-first command interface &bull; Tap or send audio prompt</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Log Column: Transcript & Live Response -->
+      <aside class="hud-sidebar hud-panel transcript-panel" aria-label="Transcript and Communications">
+        <div class="panel-header">
+          <span class="panel-icon" aria-hidden="true">&diams;</span>
+          <h2 class="panel-title">COMM LOG</h2>
+          <div class="panel-header-actions">
+            <button id="btn-export-log" class="panel-action-btn" type="button" title="Export comm log to text file">EXPORT</button>
+            <button id="btn-clear-log" class="panel-action-btn" type="button" title="Clear log">CLEAR</button>
+          </div>
+        </div>
+
+        <div id="transcript-feed" class="transcript-feed" role="log" aria-live="polite">
+          <div class="feed-entry system-entry">
+            <span class="entry-timestamp">SYSTEM</span>
+            <div class="entry-bubble">ECHO Command Center initialized. Awaiting voice prompt or input.</div>
+          </div>
+        </div>
+
+        <!-- Supporting Diagnostic Input Bar (Text fallback) -->
+        <div class="hud-input-bar">
+          <form id="command-form" class="command-form" action="javascript:void(0);">
+            <label for="command-input" class="sr-only">Diagnostic Text Input</label>
+            <input
+              id="command-input"
+              type="text"
+              class="command-input"
+              placeholder="Direct command / query..."
+              autocomplete="off"
+              maxlength="4096"
+            />
+            <button id="btn-send-command" class="command-submit-btn" type="submit" aria-label="Send query">
+              <span aria-hidden="true">&rarr;</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Security Authorization Modal (Dual Screen/Voice Confirmation) -->
+  <div id="confirmation-modal" class="hud-modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-action-title">
+    <div class="hud-modal-card">
+      <div class="modal-hazard-stripe" aria-hidden="true"></div>
+      
+      <div class="modal-header">
+        <div class="modal-warning-badge" aria-hidden="true">!</div>
+        <div>
+          <h3 id="modal-action-title" class="modal-title">SECURITY AUTHORIZATION REQUIRED</h3>
+          <span class="modal-subtitle">High-risk action intercepted by SafetyEngine</span>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-meta-grid">
+          <div class="meta-item">
+            <span class="meta-label">ACTION ID:</span>
+            <span id="modal-action-id" class="meta-value">act_unknown</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">TOOL:</span>
+            <span id="modal-tool-name" class="meta-value">operation</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">RISK LEVEL:</span>
+            <span id="modal-risk-level" class="meta-value risk-critical">CRITICAL</span>
+          </div>
+        </div>
+
+        <div class="modal-description-box">
+          <div class="box-label">INTENDED OPERATION</div>
+          <p id="modal-description-text" class="box-content">Awaiting action description...</p>
+        </div>
+
+        <div class="modal-params-box">
+          <div class="box-label">SANITIZED PARAMETERS</div>
+          <pre id="modal-params-content" class="box-params-code">{}</pre>
+        </div>
+
+        <div class="modal-voice-cue">
+          <span class="cue-icon" aria-hidden="true">&bull;</span>
+          <span>Dual Confirmation: Say <strong>"Authorize"</strong> or click below to proceed.</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="btn-abort-action" type="button" class="btn-modal btn-abort">ABORT OPERATION</button>
+        <button id="btn-confirm-action" type="button" class="btn-modal btn-authorize">AUTHORIZE &amp; EXECUTE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/hud/js/avatar.js"></script>
+  <script src="/hud/js/voice_presentation.js"></script>
+  <script src="/hud/js/gateway.js"></script>
+  <script src="/hud/js/app.js"></script>
+</body>
+</html>
