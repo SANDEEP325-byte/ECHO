@@ -200,7 +200,7 @@ def test_comm_log_export_logic() -> None:
 
 
 def test_confirmation_modal_structure() -> None:
-    """Verify confirmation modal elements match Phase 10C.1 event schemas."""
+    """Verify confirmation modal elements match Phase 10C.1 & 10F.1 event schemas."""
     index_html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
 
     assert 'id="confirmation-modal"' in index_html
@@ -211,3 +211,106 @@ def test_confirmation_modal_structure() -> None:
     assert 'id="modal-params-content"' in index_html
     assert 'id="btn-confirm-action"' in index_html
     assert 'id="btn-abort-action"' in index_html
+    # Phase 10F.1 enhancements
+    assert 'id="modal-status-badge"' in index_html
+    assert 'id="modal-timer-countdown"' in index_html
+    assert 'id="modal-execution-notice"' in index_html
+    assert "spinner-glyph" in index_html
+
+
+def test_phase_10e_articulation_and_visemes() -> None:
+    """Verify Phase 10E.2: Modular articulation & viseme foundation with canonical categories."""
+    avatar_js = (WEB_DIR / "js" / "avatar.js").read_text(encoding="utf-8")
+
+    # Canonical visual categories defined and handled
+    for viseme in ["aa", "ee", "oh", "ch", "rest"]:
+        assert f"'{viseme}'" in avatar_js or f'"{viseme}"' in avatar_js
+
+    # setViseme and resetArticulation methods present across classes
+    assert "setViseme(viseme, weight = 1.0)" in avatar_js
+    assert "resetArticulation()" in avatar_js
+
+    # BaseAvatarRenderer and HolographicCoreRenderer contracts
+    assert "this.currentViseme = 'rest';" in avatar_js
+    assert "apertureWidth" in avatar_js or "targetAperture" in avatar_js
+
+    # Explicit technical limitation documented: estimated articulation, not real PCM audio
+    assert "estimate" in avatar_js.lower() or "simulat" in avatar_js.lower()
+
+
+def test_phase_10e_voice_presentation_lifecycle() -> None:
+    """Verify Phase 10E.1: Explicit speech playback lifecycle and generation token protection."""
+    voice_js = (WEB_DIR / "js" / "voice_presentation.js").read_text(encoding="utf-8")
+
+    # Required states
+    for state in ["START", "PLAYING", "PAUSED", "COMPLETED", "INTERRUPTED", "ERROR"]:
+        assert f"{state}:" in voice_js
+
+    # Lifecycle methods
+    assert "pause()" in voice_js
+    assert "resume()" in voice_js
+    assert "stop(reason = 'stopped')" in voice_js
+    assert "isSpeaking()" in voice_js
+    assert "isPaused()" in voice_js
+
+    # Lifecycle callbacks / hooks
+    assert "onSpeechStart" in voice_js
+    assert "onSpeechEnd" in voice_js
+    assert "onSpeechPause" in voice_js
+    assert "onSpeechResume" in voice_js
+    assert "onSpeechInterrupted" in voice_js
+    assert "onViseme" in voice_js
+
+    # Generation token protection against delayed browser speech events
+    assert "_generationToken" in voice_js
+
+    # Explicit documentation of browser audio amplitude limitation
+    assert "PCM" in voice_js or "amplitude" in voice_js
+
+
+def test_phase_10e_speech_interruption_and_pacing() -> None:
+    """Verify Phase 10E.3: Speech controls, PTT interruption, and Jarvis pacing."""
+    voice_js = (WEB_DIR / "js" / "voice_presentation.js").read_text(encoding="utf-8")
+    app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
+
+    # Jarvis-style pacing parameters
+    assert "rate = 1.05" in voice_js or "1.05" in voice_js
+    assert "pitch = 0.95" in voice_js or "0.95" in voice_js
+
+    # Interruption on voice capture start
+    assert "user_interrupted" in app_js
+    # Interruption on user input submission
+    assert "user_input" in app_js
+
+
+def test_phase_10f_dual_voice_confirmation_and_duplicate_protection() -> None:
+    """Verify Phase 10F.1: Dual confirmation vocabulary, countdown, and duplicate UI suppression."""
+    app_js = (WEB_DIR / "js" / "app.js").read_text(encoding="utf-8")
+    hud_css = (WEB_DIR / "css" / "hud.css").read_text(encoding="utf-8")
+
+    # Vocabulary arrays
+    for auth_word in ["authorize", "confirm", "proceed", "yes", "approve"]:
+        assert auth_word in app_js
+    for cancel_word in ["abort", "cancel", "deny", "no", "reject", "stop"]:
+        assert cancel_word in app_js
+
+    # Conservative classification function
+    assert "classifyConfirmationIntent" in app_js
+
+    # Expiration countdown derived from expires_at
+    assert "expires_at" in app_js
+    assert "actionExpiresAt" in app_js
+
+    # Duplicate UI suppression: controls disabled on confirm/abort
+    assert "actionExecutionLocked" in app_js
+    assert "btnConfirmAction.disabled = true" in app_js
+    assert "btnAbortAction.disabled = true" in app_js
+
+    # Modal CSS styles
+    assert ".tag-pending" in hud_css
+    assert ".tag-executing" in hud_css
+    assert ".tag-success" in hud_css
+    assert ".tag-aborted" in hud_css
+    assert ".tag-expired" in hud_css
+    assert ".timer-countdown" in hud_css
+    assert ".execution-notice" in hud_css

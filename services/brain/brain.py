@@ -432,7 +432,11 @@ class ECHOBrain:
                     code_context_str = None
                     if code_ctx_obj:
                         if isinstance(code_ctx_obj, dict):
-                            from services.coding.cognition import CodeFileSlice, CodingContext, SearchHit
+                            from services.coding.cognition import (
+                                CodeFileSlice,
+                                CodingContext,
+                                SearchHit,
+                            )
 
                             ctx_instance = CodingContext(
                                 workspace_root=code_ctx_obj.get("workspace_root"),
@@ -522,6 +526,10 @@ class ECHOBrain:
     def get_pending_action(self, action_id: str) -> PendingAction | None:
         """Retrieve details of a pending action by its identifier."""
         return execution_engine.pending_action_manager.get_action(action_id)
+
+    def get_pending_action_for_session(self, session_id: str) -> PendingAction | None:
+        """Retrieve the latest active pending action bound to a session."""
+        return execution_engine.pending_action_manager.get_pending_action_for_session(session_id)
 
 
 echo_brain = ECHOBrain(

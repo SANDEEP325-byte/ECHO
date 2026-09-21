@@ -212,6 +212,33 @@ async def handle_client_message(
         return
 
     if msg.action == ClientMessageType.STATE_QUERY:
+        pending_act = echo_brain.get_pending_action_for_session(session_id)
+        if (
+            pending_act is not None
+            and not pending_act.is_expired()
+            and getattr(pending_act.state, "value", str(pending_act.state)) == "pending"
+        ):
+            sanitized_args = sanitize_action_parameters(pending_act.arguments)
+            risk_val = (
+                pending_act.risk_level.value
+                if hasattr(pending_act.risk_level, "value")
+                else str(pending_act.risk_level)
+            ).upper()
+            confirm_event = InterfaceEvent(
+                event_type=InterfaceEventType.CONFIRMATION_REQUIRED,
+                session_id=session_id,
+                payload=ConfirmationRequiredPayload(
+                    action_id=pending_act.action_id,
+                    tool_name=pending_act.tool_name,
+                    risk_level=risk_val,
+                    safe_description=f"Action '{pending_act.tool_name}' requires security authorization.",
+                    parameters=sanitized_args,
+                    expires_at=pending_act.expires_at,
+                ).model_dump(),
+            )
+            await websocket.send_json(confirm_event.model_dump())
+            return
+
         state_event = InterfaceEvent(
             event_type=InterfaceEventType.IDLE,
             session_id=session_id,
@@ -293,6 +320,12 @@ async def handle_client_message(
             raw_args = pending_act.get("arguments", {}) if isinstance(pending_act, dict) else {}
             sanitized_args = sanitize_action_parameters(raw_args)
 
+            expires_at = None
+            if pending_id:
+                p_obj = echo_brain.get_pending_action(pending_id)
+                if p_obj:
+                    expires_at = p_obj.expires_at
+
             confirm_event = InterfaceEvent(
                 event_type=InterfaceEventType.CONFIRMATION_REQUIRED,
                 session_id=session_id,
@@ -302,6 +335,7 @@ async def handle_client_message(
                     risk_level=risk_level,
                     safe_description=response_text,
                     parameters=sanitized_args,
+                    expires_at=expires_at,
                 ).model_dump(),
             )
             await connection_manager.send_event(session_id, confirm_event)

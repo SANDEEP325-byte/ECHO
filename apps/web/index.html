@@ -184,10 +184,11 @@
       
       <div class="modal-header">
         <div class="modal-warning-badge" aria-hidden="true">!</div>
-        <div>
+        <div class="modal-title-group">
           <h3 id="modal-action-title" class="modal-title">SECURITY AUTHORIZATION REQUIRED</h3>
           <span class="modal-subtitle">High-risk action intercepted by SafetyEngine</span>
         </div>
+        <span id="modal-status-badge" class="modal-status-tag tag-pending" aria-live="polite">PENDING</span>
       </div>
 
       <div class="modal-body">
@@ -204,6 +205,10 @@
             <span class="meta-label">RISK LEVEL:</span>
             <span id="modal-risk-level" class="meta-value risk-critical">CRITICAL</span>
           </div>
+          <div class="meta-item">
+            <span class="meta-label">EXPIRES IN:</span>
+            <span id="modal-timer-countdown" class="meta-value timer-countdown">05:00</span>
+          </div>
         </div>
 
         <div class="modal-description-box">
@@ -218,7 +223,12 @@
 
         <div class="modal-voice-cue">
           <span class="cue-icon" aria-hidden="true">&bull;</span>
-          <span>Dual Confirmation: Say <strong>"Authorize"</strong> or click below to proceed.</span>
+          <span id="modal-voice-cue-text">Dual Confirmation: Say <strong>"Authorize"</strong> or click below to proceed.</span>
+        </div>
+
+        <div id="modal-execution-notice" class="modal-execution-notice hidden" aria-live="polite">
+          <span class="spinner-glyph" aria-hidden="true"></span>
+          <span id="modal-execution-text">AUTHORIZING &amp; EXECUTING...</span>
         </div>
       </div>
 

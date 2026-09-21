@@ -90,6 +90,24 @@ class PendingActionManager:
 
             return action
 
+    def get_pending_action_for_session(self, session_id: str) -> PendingAction | None:
+        """Find the latest active, unexpired pending action bound to a specific session."""
+        if not session_id or not isinstance(session_id, str):
+            return None
+
+        with self._lock:
+            now = time.time()
+            for action in reversed(list(self._actions.values())):
+                if action.session_id == session_id and action.state == ActionState.PENDING:
+                    if action.is_expired(now):
+                        action.state = ActionState.EXPIRED
+                        logger.info(
+                            "Pending action {} has expired during session lookup", action.action_id
+                        )
+                        continue
+                    return action
+        return None
+
     def claim_for_execution(
         self,
         action_id: str,

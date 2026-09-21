@@ -7,6 +7,12 @@
  * - HolographicCoreRenderer: The default high-performance 60fps canvas visualizer.
  * - AvatarCore: Authoritative state controller coordinating states (IDLE, LISTENING,
  *   THINKING, SPEAKING, ALERT, ERROR, CONFIRMATION) and delegating to active renderer.
+ *
+ * IMPORTANT TECHNICAL LIMITATION NOTE (Phase 10E.2):
+ * Native browser SpeechSynthesis does not provide a direct PCM audio stream or real-time microphone
+ * amplitude. Therefore, amplitude and articulatory modulation are simulated / estimated timing signals
+ * rather than true measured acoustic energy. SpeechSynthesis boundary events serve as heuristic timing
+ * cues rather than phoneme-level forced alignment.
  */
 
 /**
@@ -24,9 +30,15 @@ class BaseAvatarRenderer {
   render(state, timestamp, metrics) {}
 
   /**
-   * Hook for phoneme / viseme timing data (Phase 10D.2+).
+   * Hook for phoneme / viseme timing data (Phase 10E.2).
+   * Canonical categories: 'aa', 'ee', 'oh', 'ch', 'rest'.
    */
   setViseme(viseme, weight = 1.0) {}
+
+  /**
+   * Reset articulatory aperture and viseme weights back to neutral rest.
+   */
+  resetArticulation() {}
 
   /**
    * Hook for facial expressions (e.g. neutral, focused, alert).
@@ -47,6 +59,24 @@ class HolographicCoreRenderer extends BaseAvatarRenderer {
     super(canvasElement);
     this.rotationAngle = 0;
     this.pulsePhase = 0;
+
+    // Canonical Viseme Mapping & Articulation State (Phase 10E.2)
+    this.currentViseme = 'rest';
+    this.visemeWeight = 0;
+    this.targetVisemeWeight = 0;
+    this.currentApertureX = 1.0;
+    this.currentApertureY = 1.0;
+    this.targetApertureX = 1.0;
+    this.targetApertureY = 1.0;
+
+    // Canonical viseme geometry modifiers (width, height, energy scalar)
+    this.VISEME_MAP = {
+      rest: { width: 1.0, height: 1.0, energy: 0.0 },
+      aa:   { width: 1.25, height: 1.85, energy: 0.9 },
+      ee:   { width: 1.75, height: 0.75, energy: 0.7 },
+      oh:   { width: 0.85, height: 1.45, energy: 0.8 },
+      ch:   { width: 1.2, height: 0.85, energy: 0.6 },
+    };
 
     this.themeColors = {
       idle: { primary: '#00f0ff', secondary: '#0066ff', core: 'rgba(0, 240, 255, 0.4)' },
@@ -102,6 +132,17 @@ class HolographicCoreRenderer extends BaseAvatarRenderer {
     const baseRadius = 70 * coreRadiusMultiplier;
     const pulseOffset = Math.sin(this.pulsePhase) * 6;
 
+    // Smoothly interpolate articulatory aperture toward targets
+    if (state === 'speaking' && audioAmp > 0.005) {
+      this.visemeWeight += (this.targetVisemeWeight - this.visemeWeight) * 0.22;
+      this.currentApertureX += (this.targetApertureX - this.currentApertureX) * 0.22;
+      this.currentApertureY += (this.targetApertureY - this.currentApertureY) * 0.22;
+    } else {
+      this.visemeWeight += (0 - this.visemeWeight) * 0.18;
+      this.currentApertureX += (1.0 - this.currentApertureX) * 0.18;
+      this.currentApertureY += (1.0 - this.currentApertureY) * 0.18;
+    }
+
     // 1. Outer Orbiting Energy Particles
     this.drawParticles(centerX, centerY, baseRadius + 60, colors.primary);
 
@@ -129,14 +170,76 @@ class HolographicCoreRenderer extends BaseAvatarRenderer {
     this.ctx.fillStyle = gradient;
     this.ctx.fill();
 
-    // 6. Central Singularity Node
+    // 6. Central Articulatory Acoustic Aperture (Phase 10E.2)
+    this.drawArticulatoryAperture(centerX, centerY, colors, audioAmp);
+  }
+
+  setViseme(viseme, weight = 1.0) {
+    const canonical = (viseme || 'rest').toLowerCase();
+    this.currentViseme = this.VISEME_MAP[canonical] ? canonical : 'rest';
+    this.targetVisemeWeight = Math.max(0, Math.min(1, weight));
+    const target = this.VISEME_MAP[this.currentViseme];
+    this.targetApertureX = target.width;
+    this.targetApertureY = target.height;
+  }
+
+  resetArticulation() {
+    this.currentViseme = 'rest';
+    this.targetVisemeWeight = 0;
+    this.targetApertureX = 1.0;
+    this.targetApertureY = 1.0;
+    this.visemeWeight = 0;
+    this.currentApertureX = 1.0;
+    this.currentApertureY = 1.0;
+  }
+
+  drawArticulatoryAperture(cx, cy, colors, audioAmp) {
+    // When idle or no estimated audio energy, render central singularity node cleanly
+    if (audioAmp <= 0.008 && this.visemeWeight <= 0.015) {
+      this.ctx.beginPath();
+      this.ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.shadowColor = colors.primary;
+      this.ctx.shadowBlur = 18;
+      this.ctx.fill();
+      this.ctx.shadowBlur = 0;
+      return;
+    }
+
+    // Articulatory acoustic iris/aperture
+    const rx = (16 + audioAmp * 24) * this.currentApertureX;
+    const ry = (13 + audioAmp * 30) * this.currentApertureY;
+
+    this.ctx.save();
+    // Outer aperture halo
     this.ctx.beginPath();
-    this.ctx.arc(centerX, centerY, 16 + Math.abs(pulseOffset * 0.5), 0, Math.PI * 2);
-    this.ctx.fillStyle = '#ffffff';
+    this.ctx.ellipse(cx, cy, rx + 4, ry + 4, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = colors.core;
     this.ctx.shadowColor = colors.primary;
     this.ctx.shadowBlur = 20;
     this.ctx.fill();
-    this.ctx.shadowBlur = 0;
+
+    // Inner aperture cavity
+    this.ctx.beginPath();
+    this.ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    this.ctx.fillStyle = 'rgba(5, 8, 17, 0.94)';
+    this.ctx.strokeStyle = colors.primary;
+    this.ctx.lineWidth = 2.0;
+    this.ctx.stroke();
+    this.ctx.fill();
+
+    // Reactive voice harmonic waveform filament inside aperture
+    this.ctx.beginPath();
+    this.ctx.moveTo(cx - rx * 0.75, cy);
+    const waveAmp = audioAmp * 12 * Math.sin(Date.now() * 0.02);
+    this.ctx.quadraticCurveTo(cx, cy - waveAmp, cx + rx * 0.75, cy);
+    this.ctx.strokeStyle = '#ffffff';
+    this.ctx.lineWidth = 2.0;
+    this.ctx.shadowColor = '#ffffff';
+    this.ctx.shadowBlur = 8;
+    this.ctx.stroke();
+
+    this.ctx.restore();
   }
 
   drawSegmentedRing(cx, cy, radius, segments, angle, color) {
@@ -261,6 +364,11 @@ class AvatarCore {
     const oldState = this.currentState;
     this.currentState = newState;
 
+    // Reset articulation immediately when transitioning out of SPEAKING state
+    if (newState !== this.STATES.SPEAKING) {
+      this.resetArticulation();
+    }
+
     this.hooks.onStateChange.forEach(callback => {
       try {
         callback(oldState, newState);
@@ -274,8 +382,18 @@ class AvatarCore {
     return this.currentState;
   }
 
+  resetArticulation() {
+    this.audioAmplitude = 0;
+    if (this.renderer && typeof this.renderer.resetArticulation === 'function') {
+      this.renderer.resetArticulation();
+    }
+  }
+
   setAudioAmplitude(level) {
     this.audioAmplitude = Math.max(0, Math.min(1, level));
+    if (this.audioAmplitude <= 0 && this.renderer && typeof this.renderer.resetArticulation === 'function') {
+      this.renderer.resetArticulation();
+    }
   }
 
   getAudioAmplitude() {

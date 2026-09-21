@@ -607,3 +607,67 @@ def test_api_get_action_detail_endpoint():
     # Missing action returns 404
     resp_missing = client.get("/actions/bad-id-xyz")
     assert resp_missing.status_code == 404
+
+
+# ==========================================
+# 10. SESSION-BOUND PENDING ACTION QUERY (PHASE 10F.2)
+# ==========================================
+
+def test_get_pending_action_for_session_success(local_manager):
+    """Verify get_pending_action_for_session returns the active, unexpired pending action."""
+    action = local_manager.create_pending_action(
+        tool_name="delete_file",
+        arguments={"path": "C:\\test.txt"},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id="session_alpha",
+        ttl_seconds=30.0,
+    )
+
+    found = local_manager.get_pending_action_for_session("session_alpha")
+    assert found is not None
+    assert found.action_id == action.action_id
+    assert found.session_id == "session_alpha"
+    assert found.is_pending() is True
+
+
+def test_get_pending_action_for_session_ignores_other_sessions(local_manager):
+    """Verify session isolation: action bound to session A is not returned for session B."""
+    local_manager.create_pending_action(
+        tool_name="delete_file",
+        arguments={"path": "C:\\test.txt"},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id="session_alpha",
+    )
+
+    found = local_manager.get_pending_action_for_session("session_beta")
+    assert found is None
+
+
+def test_get_pending_action_for_session_ignores_expired(local_manager):
+    """Verify expired actions are never returned as active pending actions for a session."""
+    local_manager.create_pending_action(
+        tool_name="delete_file",
+        arguments={"path": "C:\\test.txt"},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id="session_alpha",
+        ttl_seconds=0.05,
+    )
+
+    time.sleep(0.08)
+    found = local_manager.get_pending_action_for_session("session_alpha")
+    assert found is None
+
+
+def test_get_pending_action_for_session_ignores_completed_or_cancelled(local_manager):
+    """Verify confirmed or cancelled actions are never returned as pending for a session."""
+    action = local_manager.create_pending_action(
+        tool_name="delete_file",
+        arguments={"path": "C:\\test.txt"},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id="session_alpha",
+    )
+
+    # Cancel action
+    local_manager.cancel_action(action.action_id, session_id="session_alpha")
+    found = local_manager.get_pending_action_for_session("session_alpha")
+    assert found is None

@@ -17,6 +17,7 @@ Verifies:
 from __future__ import annotations
 
 import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -29,9 +30,11 @@ from packages.interfaces.events import (
 )
 from packages.interfaces.pending_action import ConfirmationResult, ConfirmationStatus
 from packages.interfaces.request import Request
+from packages.interfaces.security import RiskLevel
 from services.api.connection_manager import connection_manager
 from services.api.live_gateway import is_origin_allowed, sanitize_action_parameters
 from services.api.main import app
+from services.security.pending_action_manager import pending_action_manager
 
 
 def test_is_origin_allowed_validation() -> None:
@@ -440,3 +443,121 @@ async def test_connection_manager_clean_shutdown() -> None:
     await connection_manager.close_all(code=1001, reason="Test shutdown")
     mock_ws.close.assert_awaited_once_with(code=1001, reason="Test shutdown")
     assert connection_manager.get_connection_count() == 0
+
+
+def test_websocket_reconnection_state_query_restores_pending_action() -> None:
+    """Verify Phase 10F.2: WebSocket reconnection sends STATE_QUERY and restores active unexpired action."""
+    from packages.interfaces.security import RiskLevel
+    from services.security.pending_action_manager import pending_action_manager
+
+    session_id = "reconnect_restore_sess"
+    action = pending_action_manager.create_pending_action(
+        tool_name="system_reboot",
+        arguments={"grace_period": 30},
+        risk_level=RiskLevel.CRITICAL,
+        session_id=session_id,
+        ttl_seconds=60.0,
+    )
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(f"/ws/live?session_id={session_id}") as ws,
+    ):
+        # Initial IDLE on connect
+        init_event = ws.receive_json()
+        assert init_event["event_type"] == InterfaceEventType.IDLE.value
+
+        # Client queries state upon reconnection
+        ws.send_json({"action": ClientMessageType.STATE_QUERY.value})
+        restore_event = ws.receive_json()
+
+        assert restore_event["event_type"] == InterfaceEventType.CONFIRMATION_REQUIRED.value
+        payload = restore_event["payload"]
+        assert payload["action_id"] == action.action_id
+        assert payload["tool_name"] == "system_reboot"
+        assert payload["risk_level"] == "CRITICAL"
+        assert payload["expires_at"] == action.expires_at
+        assert payload["expires_at"] > 0
+        assert payload["parameters"]["grace_period"] == 30
+
+
+def test_websocket_reconnection_state_query_ignores_expired_or_other_session() -> None:
+    """Verify Phase 10F.2: Expired or other-session pending actions are never restored."""
+    # 1. Action for different session
+    pending_action_manager.create_pending_action(
+        tool_name="delete_database",
+        arguments={},
+        risk_level=RiskLevel.CRITICAL,
+        session_id="other_session_xyz",
+        ttl_seconds=60.0,
+    )
+
+    # 2. Expired action for this session
+    pending_action_manager.create_pending_action(
+        tool_name="delete_files",
+        arguments={},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id="test_sess_query",
+        ttl_seconds=0.05,
+    )
+    time.sleep(0.08)
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect("/ws/live?session_id=test_sess_query") as ws,
+    ):
+        ws.receive_json()  # Consume initial IDLE
+
+        ws.send_json({"action": ClientMessageType.STATE_QUERY.value})
+        resp = ws.receive_json()
+
+        # Must return IDLE, not CONFIRMATION_REQUIRED
+        assert resp["event_type"] == InterfaceEventType.IDLE.value
+
+
+def test_websocket_duplicate_confirmation_protection() -> None:
+    """Verify Phase 10F.2: Duplicate confirmation requests cannot execute the same action twice."""
+    session_id = "dup_confirm_sess"
+    action = pending_action_manager.create_pending_action(
+        tool_name="time",
+        arguments={},
+        risk_level=RiskLevel.SENSITIVE,
+        session_id=session_id,
+        ttl_seconds=60.0,
+    )
+
+    with (
+        TestClient(app) as client,
+        client.websocket_connect(f"/ws/live?session_id={session_id}") as ws,
+    ):
+        ws.receive_json()  # Initial IDLE
+
+        # 1. First confirmation request claims the action
+        ws.send_json(
+            {
+                "action": ClientMessageType.CONFIRM_ACTION.value,
+                "action_id": action.action_id,
+            }
+        )
+
+        res1 = ws.receive_json()
+        assert res1["event_type"] == InterfaceEventType.ACTION_RESULT.value
+        assert res1["payload"]["success"] is True
+        assert res1["payload"]["status"] == "confirmed"
+
+        # Drain IDLE
+        ws.receive_json()
+
+        # 2. Second (duplicate) confirmation request for same action
+        ws.send_json(
+            {
+                "action": ClientMessageType.CONFIRM_ACTION.value,
+                "action_id": action.action_id,
+            }
+        )
+
+        res2 = ws.receive_json()
+        assert res2["event_type"] == InterfaceEventType.ACTION_RESULT.value
+        # Authoritative backend rejects duplicate
+        assert res2["payload"]["success"] is False
+        assert res2["payload"]["status"] in ("already_processed", "not_found")
